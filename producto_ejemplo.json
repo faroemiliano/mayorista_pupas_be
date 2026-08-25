@@ -1,0 +1,56 @@
+{
+  "cod_item": "1000",
+  "item": "FILIPA",
+  "codigos_barra": [
+    "0000000008"
+  ],
+  "rubro": {
+    "id": 24496,
+    "nombre": "PIJAMAS"
+  },
+  "sub_rubro": null,
+  "marca": null,
+  "proveedor": null,
+  "costo": 370.0,
+  "porc_iva": 0.0,
+  "precios": [
+    {
+      "id": 4710,
+      "nombre": "MAYORISTA",
+      "precio": 0.0
+    },
+    {
+      "id": 22702,
+      "nombre": "MINORISTA",
+      "precio": 0.0
+    },
+    {
+      "id": 31943,
+      "nombre": "AYME",
+      "precio": 0.0
+    },
+    {
+      "id": 43406,
+      "nombre": "24 PRODUCTOS",
+      "precio": 0.0
+    }
+  ],
+  "stock": [
+    {
+      "id": 2169,
+      "nombre": "DEPOSITO",
+      "stock_real": -6.0,
+      "stock_reservado": 0.0,
+      "stock_disponible": -6.0,
+      "id_det_item": null,
+      "cod_barra_detalle": null,
+      "talle": null,
+      "color": null
+    }
+  ],
+  "habilitado": true,
+  "codigo_externo": "",
+  "fecha_creacion": "2020-11-03",
+  "imagen_url": "https://erp.duxsoftware.com.ar/servicioimagenes/images/?id=ITEM-1077-1000",
+  "ctd_unidades_por_bulto": 0.0
+}
