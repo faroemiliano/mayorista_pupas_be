@@ -66,6 +66,10 @@ def crear_catalogo(db: Session) -> dict[str, int]:
         dux_codigo="P-001",
         nombre="Campera bebé",
         slug="campera-bebe-p-001",
+        imagen_url=(
+            "https://erp.duxsoftware.com.ar/"
+            "servicioimagenes/images/?id=ITEM-TEST"
+        ),
         habilitado=True,
         categoria=categoria,
         subcategoria=abrigos,
@@ -217,6 +221,8 @@ def test_filtrar_productos_del_catalogo(
     assert resultado["items"][0]["dux_codigo"] == "P-001"
     assert resultado["items"][0]["precio_mayorista"] == "12000.00"
     assert resultado["items"][0]["precio_24_productos"] == "10500.00"
+    assert resultado["items"][0]["stock_disponible"] == "4.00"
+    assert resultado["items"][0]["tiene_stock"] is True
     assert "precios" not in resultado["items"][0]
     assert "costo" not in resultado["items"][0]
 
@@ -286,3 +292,62 @@ def test_precio_24_invalido_conserva_precio_mayorista(
 
     assert producto["precio_mayorista"] == "12000.00"
     assert producto["precio_24_productos"] == "12000.00"
+
+
+def test_obtener_filtros_publicos_del_catalogo(
+    client: TestClient,
+    db: Session,
+):
+    crear_catalogo(db)
+
+    response = client.get(
+        "/api/catalogo/filtros"
+    )
+
+    assert response.status_code == 200
+
+    filtros = response.json()
+
+    assert [
+        categoria["nombre"]
+        for categoria in filtros["categorias"]
+    ] == ["Bebés"]
+    assert [
+        subcategoria["nombre"]
+        for subcategoria
+        in filtros["categorias"][0]["subcategorias"]
+    ] == ["Abrigos", "Zapatitos"]
+    assert [
+        marca["nombre"]
+        for marca in filtros["marcas"]
+    ] == ["Acme"]
+
+
+def test_obtener_imagen_protegida_del_producto(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+):
+    ids = crear_catalogo(db)
+    imagen = b"\xff\xd8\xffcontenido-jpeg"
+
+    def fake_get_imagen(self, url):
+        assert "erp.duxsoftware.com.ar" in url
+        return imagen, "image/jpeg"
+
+    monkeypatch.setattr(
+        "app.services.producto_service."
+        "DuxClient.get_imagen",
+        fake_get_imagen,
+    )
+
+    response = client.get(
+        f"/api/productos/{ids['producto_id']}/imagen"
+    )
+
+    assert response.status_code == 200
+    assert response.content == imagen
+    assert response.headers["content-type"] == "image/jpeg"
+    assert "max-age=3600" in response.headers[
+        "cache-control"
+    ]

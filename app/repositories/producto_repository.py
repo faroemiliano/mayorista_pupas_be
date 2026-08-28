@@ -16,6 +16,25 @@ from app.models.subcategoria import Subcategoria
 
 
 # =========================================================
+# OBTENER URL DE IMAGEN POR ID DE PRODUCTO
+# =========================================================
+
+def get_producto_imagen_url(
+    db: Session,
+    producto_id: int,
+) -> str | None:
+
+    query = select(
+        Producto.imagen_url
+    ).where(
+        Producto.id == producto_id,
+        Producto.habilitado.is_(True),
+    )
+
+    return db.scalar(query)
+
+
+# =========================================================
 # OBTENER PRODUCTO POR ID
 # =========================================================
 
@@ -154,6 +173,9 @@ def get_productos(
             ),
             selectinload(
                 Producto.precios
+            ),
+            selectinload(
+                Producto.stocks
             ),
             selectinload(
                 Producto.imagenes

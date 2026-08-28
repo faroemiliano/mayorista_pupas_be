@@ -121,6 +121,9 @@ class ProductoBaseResponse(BaseModel):
     precio_mayorista: Decimal | None
     precio_24_productos: Decimal | None
 
+    stock_disponible: Decimal
+    tiene_stock: bool
+
     imagen_url: str | None
 
     cantidad_unidades_por_bulto: Decimal | None

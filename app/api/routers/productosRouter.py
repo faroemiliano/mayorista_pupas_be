@@ -5,9 +5,13 @@ from fastapi import (
     Query,
     status,
 )
+from fastapi.responses import Response
+import httpx
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
+from app.core.security import get_usuario_opcional
+from app.models.usuario import Usuario
 
 from app.schemas.producto_schemas import (
     ProductoDetalleResponse,
@@ -16,6 +20,7 @@ from app.schemas.producto_schemas import (
 
 from app.services.producto_service import (
     get_producto_by_slug_service,
+    get_producto_imagen_service,
     get_producto_service,
     get_productos_service,
 )
@@ -71,7 +76,11 @@ def listar_productos(
     orden: str = "nombre_asc",
 
     db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
+
+    if not solo_habilitados and (usuario is None or usuario.rol != "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sólo un administrador puede ver productos ocultos.")
 
     return get_productos_service(
         db=db,
@@ -84,6 +93,62 @@ def listar_productos(
         page=page,
         limit=limit,
         orden=orden,
+        mostrar_precios=usuario is not None,
+    )
+
+
+# =========================================================
+# IMAGEN DEL PRODUCTO
+# =========================================================
+
+@router.get(
+    "/{producto_id}/imagen",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "image/jpeg": {},
+                "image/png": {},
+                "image/gif": {},
+                "image/webp": {},
+            },
+            "description": "Imagen del producto.",
+        }
+    },
+)
+def obtener_imagen_producto(
+    producto_id: int,
+    db: Session = Depends(get_db),
+):
+
+    try:
+        resultado = get_producto_imagen_service(
+            db=db,
+            producto_id=producto_id,
+        )
+    except (
+        httpx.HTTPError,
+        ValueError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo obtener la imagen desde Dux.",
+        ) from error
+
+    if resultado is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El producto no tiene imagen.",
+        )
+
+    imagen, media_type = resultado
+
+    return Response(
+        content=imagen,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",
+        },
     )
 
 
@@ -100,11 +165,12 @@ def listar_productos(
 def obtener_producto_por_slug(
     slug: str,
     db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
 
     producto = get_producto_by_slug_service(
         db,
-        slug,
+        slug, mostrar_precios=usuario is not None,
     )
 
     if producto is None:
@@ -127,11 +193,12 @@ def obtener_producto_por_slug(
 def obtener_producto(
     producto_id: int,
     db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
 
     producto = get_producto_service(
         db,
-        producto_id,
+        producto_id, mostrar_precios=usuario is not None,
     )
 
     if producto is None:

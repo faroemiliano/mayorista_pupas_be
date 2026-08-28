@@ -4,21 +4,46 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.integrations.dux.client import DuxClient
 from app.models.producto import Producto
 
 from app.repositories.producto_repository import (
     get_producto,
     get_producto_by_slug,
+    get_producto_imagen_url,
     get_productos,
 )
+
+
+# =========================================================
+# OBTENER IMAGEN PROTEGIDA DE DUX
+# =========================================================
+
+def get_producto_imagen_service(
+    db: Session,
+    producto_id: int,
+) -> tuple[bytes, str] | None:
+
+    imagen_url = get_producto_imagen_url(
+        db=db,
+        producto_id=producto_id,
+    )
+
+    if imagen_url is None:
+        return None
+
+    return DuxClient().get_imagen(
+        imagen_url
+    )
 
 
 # =========================================================
 # PRECIOS DEL CATÁLOGO MAYORISTA
 # =========================================================
 
-def aplicar_precios_catalogo(
+def aplicar_datos_catalogo(
     producto: Producto,
+    mostrar_precios: bool = True,
 ) -> Producto:
 
     precios_por_lista = {
@@ -40,9 +65,25 @@ def aplicar_precios_catalogo(
         or precio_mayorista
     )
 
-    producto.precio_mayorista = precio_mayorista
+    producto.precio_mayorista = precio_mayorista if mostrar_precios else None
     producto.precio_24_productos = (
-        precio_24_productos
+        precio_24_productos if mostrar_precios else None
+    )
+
+    stock_disponible = sum(
+        (
+            Decimal(stock.stock_disponible)
+            for stock in producto.stocks
+        ),
+        start=Decimal("0.00"),
+    )
+
+    producto.stock_disponible = max(
+        stock_disponible,
+        Decimal("0.00"),
+    )
+    producto.tiene_stock = (
+        producto.stock_disponible > 0
     )
 
     return producto
@@ -55,6 +96,7 @@ def aplicar_precios_catalogo(
 def get_producto_service(
     db: Session,
     producto_id: int,
+    mostrar_precios: bool = True,
 ) -> Producto | None:
 
     producto = get_producto(
@@ -65,8 +107,8 @@ def get_producto_service(
     if producto is None:
         return None
 
-    return aplicar_precios_catalogo(
-        producto
+    return aplicar_datos_catalogo(
+        producto, mostrar_precios
     )
 
 
@@ -77,6 +119,7 @@ def get_producto_service(
 def get_producto_by_slug_service(
     db: Session,
     slug: str,
+    mostrar_precios: bool = True,
 ) -> Producto | None:
 
     producto = get_producto_by_slug(
@@ -87,8 +130,8 @@ def get_producto_by_slug_service(
     if producto is None:
         return None
 
-    return aplicar_precios_catalogo(
-        producto
+    return aplicar_datos_catalogo(
+        producto, mostrar_precios
     )
 
 
@@ -107,6 +150,7 @@ def get_productos_service(
     page: int = 1,
     limit: int = 20,
     orden: str = "nombre_asc",
+    mostrar_precios: bool = True,
 ) -> dict:
 
     productos, total = get_productos(
@@ -123,8 +167,8 @@ def get_productos_service(
     )
 
     for producto in productos:
-        aplicar_precios_catalogo(
-            producto
+        aplicar_datos_catalogo(
+            producto, mostrar_precios
         )
 
     total_paginas = (

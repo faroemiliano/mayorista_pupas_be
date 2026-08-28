@@ -6,3 +6,8 @@ from app.models.precio_producto import PrecioProducto
 from app.models.stock_producto import StockProducto
 from app.models.imagen_producto import ImagenProducto
 from app.models.codigo_barra_producto import CodigoBarraProducto
+from app.models.pedido import Pedido
+from app.models.pedido_item import PedidoItem
+from app.models.usuario import Usuario
+from app.models.cliente_dux import ClienteDux
+from app.models.sincronizacion_dux import SincronizacionDux
