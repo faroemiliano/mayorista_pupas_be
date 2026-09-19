@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
+from app.models.stock_talle_producto import StockTalleProducto
 
 
 def crear_producto(
@@ -42,6 +43,7 @@ def crear_producto(
             stock_disponible=100,
         )
     )
+    producto.stocks_talles.append(StockTalleProducto(talle=1, cantidad=100))
     db.add(producto)
     db.flush()
 
@@ -75,6 +77,9 @@ def test_carrito_usa_precio_mayorista_antes_de_24(
         "cantidad_productos_diferentes"
     ] == 1
     assert carrito["cantidad_unidades"] == 3
+    assert carrito["compra_minima_unidades"] == 6
+    assert carrito["faltantes_para_compra_minima"] == 3
+    assert carrito["cumple_compra_minima"] is False
     assert carrito[
         "aplica_precio_24_productos"
     ] is False
@@ -265,9 +270,28 @@ def test_carrito_rechaza_cantidad_superior_al_stock(
     )
 
     assert response.status_code == 400
-    assert "100.00 unidades disponibles" in (
+    assert "talle 1" in (
         response.json()["detail"]
     )
+
+
+def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, db: Session):
+    producto = crear_producto(db, 8)
+    producto.stocks_talles[0].cantidad = 50
+    producto.stocks_talles.append(StockTalleProducto(talle=2, cantidad=50))
+    db.commit()
+
+    response = client.post("/api/carrito/calcular", json={"items": [
+        {"producto_id": producto.id, "talle": 1, "cantidad": 2},
+        {"producto_id": producto.id, "talle": 2, "cantidad": 4},
+    ]})
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["cantidad_productos_diferentes"] == 1
+    assert data["cantidad_unidades"] == 6
+    assert data["cumple_compra_minima"] is True
+    assert {(item["talle"], item["cantidad"]) for item in data["items"]} == {(1, 2), (2, 4)}
 
     assert client.post(
         "/api/carrito/calcular",

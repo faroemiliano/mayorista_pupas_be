@@ -25,6 +25,7 @@ def get_productos_carrito(
             selectinload(
                 Producto.stocks
             ),
+            selectinload(Producto.stocks_talles),
             selectinload(
                 Producto.imagenes
             ),
@@ -32,6 +33,7 @@ def get_productos_carrito(
         .where(
             Producto.id.in_(producto_ids),
             Producto.habilitado.is_(True),
+            Producto.visible_tienda.is_(True),
         )
     )
 

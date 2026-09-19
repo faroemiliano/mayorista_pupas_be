@@ -6,10 +6,38 @@ def test_visitante_no_puede_usar_carrito(public_client):
 def test_visitante_no_puede_entrar_al_panel(public_client):
     assert public_client.get("/api/admin/pedidos/").status_code == 401
     assert public_client.get("/api/admin/productos/analitica").status_code == 401
+    assert public_client.patch("/api/admin/pedidos/1/estado", json={"estado":"cancelado"}).status_code == 401
 
 
 def test_visitante_no_puede_ver_mis_pedidos(public_client):
     assert public_client.get("/api/pedidos/mios").status_code == 401
+
+
+def test_registro_guarda_perfil_comercial(public_client, db):
+    from app.models.usuario import Usuario
+    from sqlalchemy import select
+
+    response = public_client.post("/api/auth/registro", json={
+        "nombre": "Tienda Prueba",
+        "email": "tienda.prueba@test.local",
+        "telefono": "3415551234",
+        "password": "password-seguro",
+        "confirmar_password": "password-seguro",
+        "provincia": "Santa Fe",
+        "localidad_partido": "Rosario",
+        "domicilio": "Calle Prueba 123",
+        "canal_venta": "ambos",
+        "tienda_online_url": "https://tienda.example.com",
+    })
+
+    assert response.status_code == 201, response.text
+    usuario = db.scalar(select(Usuario).where(Usuario.email == "tienda.prueba@test.local"))
+    assert usuario is not None
+    assert usuario.provincia == "Santa Fe"
+    assert usuario.localidad_partido == "Rosario"
+    assert usuario.domicilio == "Calle Prueba 123"
+    assert usuario.canal_venta == "ambos"
+    assert usuario.tienda_online_url == "https://tienda.example.com"
 
 
 def test_admin_conserva_historial_de_registros(client, db):

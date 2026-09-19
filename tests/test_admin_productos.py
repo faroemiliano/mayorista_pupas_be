@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
+from app.models.stock_talle_producto import StockTalleProducto
 
 
 def crear_producto(db_session, numero: int) -> Producto:
@@ -24,6 +25,7 @@ def crear_producto(db_session, numero: int) -> Producto:
             stock_disponible=50,
         )
     )
+    producto.stocks_talles.append(StockTalleProducto(talle=1, cantidad=50))
     db_session.add(producto)
     db_session.commit()
     db_session.refresh(producto)
@@ -53,6 +55,21 @@ def test_analitica_clasifica_productos_vendidos_y_sin_ventas(client, db):
     assert data["resumen"]["unidades_vendidas"] == 50
     assert data["mas_vendidos"][0]["producto_id"] == vendido.id
     assert data["sin_ventas"][0]["producto_id"] == sin_ventas.id
+    assert data["agrupacion"] == "dia"
+    assert data["serie_ventas"][-1]["pedidos"] == 1
+    assert data["serie_ventas"][-1]["unidades"] == 50
+    assert Decimal(data["serie_ventas"][-1]["importe"]) > 0
+
+
+def test_analitica_permite_agrupar_ventas_por_semana(client):
+    response = client.get("/api/admin/productos/analitica?dias=90&agrupacion=semana")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agrupacion"] == "semana"
+    assert len(data["serie_ventas"]) >= 12
+
+    invalida = client.get("/api/admin/productos/analitica?agrupacion=trimestre")
+    assert invalida.status_code == 422
 
 
 def test_analitica_no_cuenta_pedidos_cancelados(client, db):
@@ -77,3 +94,35 @@ def test_analitica_no_cuenta_pedidos_cancelados(client, db):
     data = client.get("/api/admin/productos/analitica").json()
     assert data["resumen"]["unidades_vendidas"] == 0
     assert data["resumen"]["productos_con_ventas"] == 0
+
+
+def test_admin_puede_ocultar_producto_solo_en_la_tienda(client, db):
+    producto = crear_producto(db, 4)
+    response = client.patch(
+        f"/api/admin/productos/{producto.id}/visibilidad",
+        json={"visible": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["visible_tienda"] is False
+
+    catalogo = client.get("/api/productos/?solo_habilitados=true")
+    assert catalogo.status_code == 200
+    assert catalogo.json()["total"] == 0
+
+    administracion = client.get("/api/productos/?solo_habilitados=false")
+    assert administracion.json()["total"] == 1
+    assert administracion.json()["items"][0]["visible_tienda"] is False
+
+
+def test_admin_distribuye_stock_dux_entre_talles(client, db):
+    producto = crear_producto(db, 9)
+    response = client.post(f"/api/admin/productos/{producto.id}/stock-talles", json={
+        "talles": [{"talle": talle, "cantidad": 10} for talle in range(1, 6)]
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["total_distribuido"] == 50
+
+    exceso = client.post(f"/api/admin/productos/{producto.id}/stock-talles", json={
+        "talles": [{"talle": talle, "cantidad": 11} for talle in range(1, 6)]
+    })
+    assert exceso.status_code == 422

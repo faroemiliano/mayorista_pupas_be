@@ -20,6 +20,7 @@ from app.schemas.producto_schemas import (
 
 from app.services.producto_service import (
     get_producto_by_slug_service,
+    get_imagen_producto_service,
     get_producto_imagen_service,
     get_producto_service,
     get_productos_service,
@@ -152,6 +153,41 @@ def obtener_imagen_producto(
     )
 
 
+@router.get(
+    "/{producto_id}/imagenes/{imagen_id}",
+    response_class=Response,
+)
+def obtener_imagen_adicional_producto(
+    producto_id: int,
+    imagen_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        resultado = get_imagen_producto_service(
+            db=db,
+            producto_id=producto_id,
+            imagen_id=imagen_id,
+        )
+    except (httpx.HTTPError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo obtener la imagen desde Dux.",
+        ) from error
+
+    if resultado is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Imagen no encontrada para este producto.",
+        )
+
+    imagen, media_type = resultado
+    return Response(
+        content=imagen,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 # =========================================================
 # PRODUCTO POR SLUG
 # IMPORTANTE:
@@ -178,6 +214,9 @@ def obtener_producto_por_slug(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado.",
         )
+
+    if not producto.visible_tienda and (usuario is None or usuario.rol != "admin"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto
 
@@ -206,5 +245,8 @@ def obtener_producto(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado.",
         )
+
+    if not producto.visible_tienda and (usuario is None or usuario.rol != "admin"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto

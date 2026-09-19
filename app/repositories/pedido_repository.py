@@ -1,4 +1,6 @@
-from sqlalchemy import func, select
+from datetime import datetime
+
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.pedido import Pedido
@@ -26,6 +28,9 @@ def get_pedidos(
     page: int,
     limit: int,
     usuario_id: int | None = None,
+    buscar: str | None = None,
+    fecha_desde: datetime | None = None,
+    fecha_hasta: datetime | None = None,
 ) -> tuple[list[Pedido], int]:
     query = select(Pedido).options(
         selectinload(Pedido.items)
@@ -39,6 +44,26 @@ def get_pedidos(
     if estado:
         query = query.where(Pedido.estado == estado)
         count_query = count_query.where(Pedido.estado == estado)
+
+    if buscar and (termino := buscar.strip()):
+        patron = f"%{termino}%"
+        filtro = or_(
+            Pedido.codigo.ilike(patron),
+            Pedido.cliente_nombre.ilike(patron),
+            Pedido.cliente_email.ilike(patron),
+            Pedido.cliente_telefono.ilike(patron),
+            cast(Pedido.id, String).ilike(patron),
+        )
+        query = query.where(filtro)
+        count_query = count_query.where(filtro)
+
+    if fecha_desde is not None:
+        query = query.where(Pedido.creado_en >= fecha_desde)
+        count_query = count_query.where(Pedido.creado_en >= fecha_desde)
+
+    if fecha_hasta is not None:
+        query = query.where(Pedido.creado_en < fecha_hasta)
+        count_query = count_query.where(Pedido.creado_en < fecha_hasta)
 
     query = (
         query.order_by(Pedido.creado_en.desc())

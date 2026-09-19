@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy import ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -40,6 +40,7 @@ class PedidoItem(Base):
     cantidad: Mapped[int] = mapped_column(
         nullable=False,
     )
+    talle: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_mayorista: Mapped[Decimal] = mapped_column(
         Numeric(14, 2),
         nullable=False,

@@ -88,6 +88,12 @@ class ImagenProductoResponse(BaseModel):
         from_attributes=True,
     )
 
+class StockTalleResponse(BaseModel):
+    talle: int
+    cantidad: int
+    disponible: int
+    model_config = ConfigDict(from_attributes=True)
+
 
 # =========================================================
 # CÓDIGO DE BARRA
@@ -125,10 +131,12 @@ class ProductoBaseResponse(BaseModel):
     tiene_stock: bool
 
     imagen_url: str | None
+    talles: list[StockTalleResponse] = []
 
     cantidad_unidades_por_bulto: Decimal | None
 
     habilitado: bool
+    visible_tienda: bool
 
     fecha_creacion_dux: date | None
 

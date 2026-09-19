@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.categoria import Categoria
 from app.models.marca import Marca
+from app.models.imagen_producto import ImagenProducto
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
@@ -351,3 +352,38 @@ def test_obtener_imagen_protegida_del_producto(
     assert "max-age=3600" in response.headers[
         "cache-control"
     ]
+
+
+def test_obtener_imagen_adicional_del_producto(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+):
+    ids = crear_catalogo(db)
+    imagen_producto = ImagenProducto(
+        producto_id=ids["producto_id"],
+        url="https://erp.duxsoftware.com.ar/segunda-imagen",
+        orden=1,
+        principal=False,
+    )
+    db.add(imagen_producto)
+    db.commit()
+    db.refresh(imagen_producto)
+
+    monkeypatch.setattr(
+        "app.services.producto_service.DuxClient.get_imagen",
+        lambda self, url: (b"imagen-adicional", "image/webp"),
+    )
+
+    response = client.get(
+        f"/api/productos/{ids['producto_id']}/imagenes/{imagen_producto.id}"
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"imagen-adicional"
+    assert response.headers["content-type"] == "image/webp"
+
+    response_otro_producto = client.get(
+        f"/api/productos/{ids['producto_id'] + 999}/imagenes/{imagen_producto.id}"
+    )
+    assert response_otro_producto.status_code == 404

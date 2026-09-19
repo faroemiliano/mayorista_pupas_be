@@ -8,6 +8,7 @@ from app.models.producto import Producto
 from app.repositories.carrito_repository import (
     get_productos_carrito,
 )
+from app.repositories.reserva_stock_repository import cantidades_reservadas, cantidades_reservadas_por_talle
 from app.schemas.carrito_schemas import (
     CarritoCalcularRequest,
 )
@@ -44,14 +45,14 @@ def calcular_carrito_service(
     carrito: CarritoCalcularRequest,
 ) -> dict:
 
-    cantidades: dict[int, int] = defaultdict(int)
+    cantidades: dict[tuple[int, int], int] = defaultdict(int)
 
     for item in carrito.items:
-        cantidades[item.producto_id] += (
+        cantidades[(item.producto_id, item.talle)] += (
             item.cantidad
         )
 
-    producto_ids = set(cantidades)
+    producto_ids = {producto_id for producto_id, _ in cantidades}
     productos = get_productos_carrito(
         db=db,
         producto_ids=producto_ids,
@@ -60,6 +61,8 @@ def calcular_carrito_service(
         producto.id: producto
         for producto in productos
     }
+    reservas_por_producto = cantidades_reservadas(db, producto_ids)
+    reservas_por_talle = cantidades_reservadas_por_talle(db, producto_ids)
 
     productos_no_disponibles = sorted(
         producto_ids - set(productos_por_id)
@@ -77,9 +80,7 @@ def calcular_carrito_service(
         )
 
     cantidad_diferentes = len(producto_ids)
-    cantidad_unidades = sum(
-        cantidades.values()
-    )
+    cantidad_unidades = sum(cantidades.values())
     aplica_precio_24 = (
         cantidad_unidades
         >= CANTIDAD_UNIDADES_PRECIO_ESPECIAL
@@ -89,7 +90,7 @@ def calcular_carrito_service(
     total = Decimal("0.00")
     subtotal_sin_descuento = Decimal("0.00")
 
-    for producto_id in sorted(producto_ids):
+    for producto_id, talle in sorted(cantidades):
         producto = productos_por_id[producto_id]
 
         precio_mayorista = _obtener_precio(
@@ -114,9 +115,15 @@ def calcular_carrito_service(
             if precio_24 is not None:
                 precio_unitario = precio_24
 
-        cantidad = cantidades[producto_id]
+        cantidad = cantidades[(producto_id, talle)]
+        stock_talle = next((item.cantidad for item in producto.stocks_talles if item.talle == talle), None)
+        if stock_talle is None:
+            raise CarritoError(f"El producto {producto.id} no tiene configurado el talle {talle}.")
+        disponible_talle = max(stock_talle - reservas_por_talle.get((producto_id, talle), 0), 0)
+        if cantidad > disponible_talle:
+            raise CarritoError(f"El producto {producto.id}, talle {talle}, tiene {disponible_talle} unidades disponibles.")
 
-        stock_disponible = max(
+        stock_dux = max(
             sum(
                 (
                     Decimal(stock.stock_disponible)
@@ -124,6 +131,10 @@ def calcular_carrito_service(
                 ),
                 start=Decimal("0.00"),
             ),
+            Decimal("0.00"),
+        )
+        stock_disponible = max(
+            stock_dux - Decimal(reservas_por_producto.get(producto_id, 0)),
             Decimal("0.00"),
         )
 
@@ -152,6 +163,7 @@ def calcular_carrito_service(
             "slug": producto.slug,
             "imagen_url": producto.imagen_url,
             "cantidad": cantidad,
+            "talle": talle,
             "precio_mayorista": precio_mayorista,
             "precio_unitario": precio_unitario,
             "subtotal_sin_descuento": (
@@ -182,4 +194,10 @@ def calcular_carrito_service(
             subtotal_sin_descuento - total
         ),
         "total": total,
+        "compra_minima_unidades": settings.COMPRA_MINIMA_UNIDADES,
+        "faltantes_para_compra_minima": max(
+            settings.COMPRA_MINIMA_UNIDADES - cantidad_unidades,
+            0,
+        ),
+        "cumple_compra_minima": cantidad_unidades >= settings.COMPRA_MINIMA_UNIDADES,
     }

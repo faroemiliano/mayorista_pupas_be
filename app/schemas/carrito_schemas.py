@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class CarritoItemRequest(BaseModel):
     producto_id: int = Field(gt=0)
+    talle: int = Field(default=1, ge=1, le=5)
     cantidad: int = Field(gt=0)
 
 
@@ -21,6 +22,7 @@ class CarritoItemResponse(BaseModel):
     slug: str
     imagen_url: str | None
     cantidad: int
+    talle: int
     precio_mayorista: Decimal
     precio_unitario: Decimal
     subtotal_sin_descuento: Decimal
@@ -37,3 +39,6 @@ class CarritoCalcularResponse(BaseModel):
     subtotal_sin_descuento: Decimal
     descuento_aplicado: Decimal
     total: Decimal
+    compra_minima_unidades: int
+    faltantes_para_compra_minima: int
+    cumple_compra_minima: bool

@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -55,11 +57,31 @@ def obtener_pedido(codigo: str, db: Session = Depends(get_db), usuario: Usuario 
 @admin_router.get("/", response_model=PedidoListadoResponse)
 def listar_pedidos_admin(
     estado: PedidoEstado | None = None,
+    buscar: str | None = Query(default=None, max_length=150),
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return get_pedidos_service(db, estado, page, limit)
+    try:
+        return get_pedidos_service(
+            db, estado, page, limit,
+            buscar=buscar,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+        )
+    except PedidoError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@admin_router.get("/{pedido_id}", response_model=PedidoResponse)
+def obtener_pedido_admin(pedido_id: int, db: Session = Depends(get_db)):
+    from app.repositories.pedido_repository import get_pedido
+    pedido = get_pedido(db, pedido_id)
+    if pedido is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
+    return pedido
 
 
 @admin_router.patch("/{pedido_id}/estado", response_model=PedidoResponse)
@@ -68,7 +90,10 @@ def actualizar_estado_pedido(
     data: PedidoEstadoRequest,
     db: Session = Depends(get_db),
 ):
-    pedido = actualizar_estado_pedido_service(db, pedido_id, data.estado)
+    try:
+        pedido = actualizar_estado_pedido_service(db, pedido_id, data.estado)
+    except PedidoError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
     return pedido

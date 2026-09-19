@@ -52,3 +52,21 @@ def get_analitica_productos(
         .where(Producto.habilitado.is_(True))
     )
     return [dict(row) for row in db.execute(query).mappings().all()]
+
+
+def get_ventas_temporales(
+    db: Session,
+    desde: datetime | None,
+) -> list[dict]:
+    query = (
+        select(
+            Pedido.creado_en,
+            Pedido.total,
+            Pedido.cantidad_unidades,
+        )
+        .where(Pedido.estado != "cancelado")
+        .order_by(Pedido.creado_en)
+    )
+    if desde is not None:
+        query = query.where(Pedido.creado_en >= desde)
+    return [dict(row) for row in db.execute(query).mappings().all()]

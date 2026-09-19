@@ -10,9 +10,11 @@ from sqlalchemy.orm import (
 
 from app.models.categoria import Categoria
 from app.models.marca import Marca
+from app.models.imagen_producto import ImagenProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.subcategoria import Subcategoria
+from app.models.reserva_stock import ReservaStock
 
 
 # =========================================================
@@ -29,6 +31,27 @@ def get_producto_imagen_url(
     ).where(
         Producto.id == producto_id,
         Producto.habilitado.is_(True),
+    )
+
+    return db.scalar(query)
+
+
+def get_imagen_producto_url(
+    db: Session,
+    producto_id: int,
+    imagen_id: int,
+) -> str | None:
+    """Obtiene una imagen que realmente pertenece al producto solicitado."""
+
+    query = (
+        select(ImagenProducto.url)
+        .join(Producto, Producto.id == ImagenProducto.producto_id)
+        .where(
+            ImagenProducto.id == imagen_id,
+            ImagenProducto.producto_id == producto_id,
+            Producto.habilitado.is_(True),
+            Producto.visible_tienda.is_(True),
+        )
     )
 
     return db.scalar(query)
@@ -61,6 +84,7 @@ def get_producto(
             selectinload(
                 Producto.stocks
             ),
+            selectinload(Producto.stocks_talles),
             selectinload(
                 Producto.imagenes
             ),
@@ -103,6 +127,7 @@ def get_producto_by_slug(
             selectinload(
                 Producto.stocks
             ),
+            selectinload(Producto.stocks_talles),
             selectinload(
                 Producto.imagenes
             ),
@@ -177,6 +202,7 @@ def get_productos(
             selectinload(
                 Producto.stocks
             ),
+            selectinload(Producto.stocks_talles),
             selectinload(
                 Producto.imagenes
             ),
@@ -199,6 +225,7 @@ def get_productos(
 
         filtro = (
             Producto.habilitado.is_(True)
+            & Producto.visible_tienda.is_(True)
         )
 
         query = query.where(
@@ -278,27 +305,33 @@ def get_productos(
 # STOCK
 # =====================================================
 
-    if con_stock is True:
-
-        filtro = Producto.stocks.any(
-            StockProducto.stock_disponible > 0
-        )
-
-        query = query.where(
-            filtro
-        )
-
-        count_query = (
-            count_query.where(
-                filtro
+    if con_stock is not None:
+        stock_totales = (
+            select(
+                StockProducto.producto_id.label("producto_id"),
+                func.sum(StockProducto.stock_disponible).label("cantidad"),
             )
+            .group_by(StockProducto.producto_id)
+            .subquery()
         )
-
-    elif con_stock is False:
-
-        filtro = ~Producto.stocks.any(
-            StockProducto.stock_disponible > 0
+        reservas_totales = (
+            select(
+                ReservaStock.producto_id.label("producto_id"),
+                func.sum(ReservaStock.cantidad).label("cantidad"),
+            )
+            .where(ReservaStock.estado.in_(("activa", "enviada_dux")))
+            .group_by(ReservaStock.producto_id)
+            .subquery()
         )
+        query = query.outerjoin(stock_totales, stock_totales.c.producto_id == Producto.id)
+        query = query.outerjoin(reservas_totales, reservas_totales.c.producto_id == Producto.id)
+        count_query = count_query.outerjoin(stock_totales, stock_totales.c.producto_id == Producto.id)
+        count_query = count_query.outerjoin(reservas_totales, reservas_totales.c.producto_id == Producto.id)
+        stock_efectivo = (
+            func.coalesce(stock_totales.c.cantidad, 0)
+            - func.coalesce(reservas_totales.c.cantidad, 0)
+        )
+        filtro = stock_efectivo > 0 if con_stock else stock_efectivo <= 0
 
         query = query.where(
             filtro
@@ -364,25 +397,29 @@ def get_productos(
     if orden == "nombre_desc":
 
         query = query.order_by(
-            Producto.nombre.desc()
+            Producto.nombre.desc(),
+            Producto.id.desc(),
         )
 
     elif orden == "recientes":
 
         query = query.order_by(
-            Producto.fecha_creacion_dux.desc()
+            Producto.fecha_creacion_dux.desc().nulls_last(),
+            Producto.id.desc(),
         )
 
     elif orden == "antiguos":
 
         query = query.order_by(
-            Producto.fecha_creacion_dux.asc()
+            Producto.fecha_creacion_dux.asc().nulls_last(),
+            Producto.id.asc(),
         )
 
     else:
 
         query = query.order_by(
-            Producto.nombre.asc()
+            Producto.nombre.asc(),
+            Producto.id.asc(),
         )
 
     # =====================================================

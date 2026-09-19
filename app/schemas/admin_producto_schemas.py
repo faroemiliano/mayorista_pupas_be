@@ -21,6 +21,16 @@ class ProductoAnaliticaResumenResponse(BaseModel):
     productos_sin_ventas: int
 
 
+class VentaTemporalResponse(BaseModel):
+    clave: str
+    etiqueta: str
+    inicio: datetime
+    pedidos: int
+    unidades: int
+    importe: Decimal
+    variacion_porcentual: float | None
+
+
 class ProductoAnaliticaResponse(BaseModel):
     origen: str
     alcance: str
@@ -28,6 +38,8 @@ class ProductoAnaliticaResponse(BaseModel):
     desde: datetime | None
     hasta: datetime
     resumen: ProductoAnaliticaResumenResponse
+    agrupacion: str
+    serie_ventas: list[VentaTemporalResponse]
     mas_vendidos: list[ProductoVentaRankingResponse]
     menos_vendidos: list[ProductoVentaRankingResponse]
     sin_ventas: list[ProductoVentaRankingResponse]

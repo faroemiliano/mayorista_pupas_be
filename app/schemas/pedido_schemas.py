@@ -36,6 +36,7 @@ class PedidoItemResponse(BaseModel):
     dux_codigo: str
     producto_nombre: str
     cantidad: int
+    talle: int | None
     precio_mayorista: Decimal
     precio_unitario: Decimal
     subtotal_sin_descuento: Decimal

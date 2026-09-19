@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from app.models.marca import Marca
     from app.models.precio_producto import PrecioProducto
     from app.models.stock_producto import StockProducto
+    from app.models.stock_talle_producto import StockTalleProducto
     from app.models.subcategoria import Subcategoria
 
 
@@ -91,6 +92,10 @@ class Producto(Base):
         server_default="true",
     )
 
+    visible_tienda: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true",
+    )
+
     fecha_creacion_dux: Mapped[date | None] = mapped_column(
         Date,
         nullable=True,
@@ -156,6 +161,9 @@ class Producto(Base):
     stocks: Mapped[list["StockProducto"]] = relationship(
         back_populates="producto",
         cascade="all, delete-orphan",
+    )
+    stocks_talles: Mapped[list["StockTalleProducto"]] = relationship(
+        back_populates="producto", cascade="all, delete-orphan", order_by="StockTalleProducto.talle",
     )
 
     imagenes: Mapped[list["ImagenProducto"]] = relationship(

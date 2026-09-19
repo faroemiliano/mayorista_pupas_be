@@ -10,6 +10,7 @@ from app.database.base import Base
 
 if TYPE_CHECKING:
     from app.models.pedido_item import PedidoItem
+    from app.models.reserva_stock import ReservaStock
     from app.models.usuario import Usuario
 
 
@@ -110,3 +111,7 @@ class Pedido(Base):
         order_by="PedidoItem.id",
     )
     usuario: Mapped["Usuario | None"] = relationship(back_populates="pedidos")
+    reservas_stock: Mapped[list["ReservaStock"]] = relationship(
+        back_populates="pedido",
+        cascade="all, delete-orphan",
+    )

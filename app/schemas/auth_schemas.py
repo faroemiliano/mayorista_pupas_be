@@ -14,10 +14,17 @@ class UsuarioResponse(BaseModel):
     apellido: str
     telefono: str | None
     documento: str | None
+    provincia: str | None
+    localidad_partido: str | None
+    domicilio: str | None
+    canal_venta: str | None
+    tienda_online_url: str | None
     avatar_url: str | None
     rol: str
     email_verificado: bool
+    acepta_promociones_email: bool
     estado_registro: str
+    dux_id_cliente: int | None
     creado_en: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -27,7 +34,11 @@ class RegistroRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
     telefono: str = Field(min_length=6, max_length=50)
-    documento: str | None = Field(default=None, pattern=r"^\d{7,11}$")
+    provincia: str = Field(min_length=2, max_length=100)
+    localidad_partido: str = Field(min_length=2, max_length=150)
+    domicilio: str = Field(min_length=4, max_length=250)
+    canal_venta: str = Field(pattern=r"^(local_fisico|tienda_online|ambos)$")
+    tienda_online_url: str | None = Field(default=None, max_length=500)
     password: str = Field(min_length=8, max_length=128)
     confirmar_password: str = Field(min_length=8, max_length=128)
 
@@ -47,6 +58,12 @@ class ActualizarPerfilRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
     telefono: str = Field(min_length=6, max_length=50)
     documento: str | None = Field(default=None, pattern=r"^\d{7,11}$")
+    acepta_promociones_email: bool = False
+    provincia: str | None = Field(default=None, max_length=100)
+    localidad_partido: str | None = Field(default=None, max_length=150)
+    domicilio: str | None = Field(default=None, max_length=250)
+    canal_venta: str | None = Field(default=None, pattern=r"^(local_fisico|tienda_online|ambos)$")
+    tienda_online_url: str | None = Field(default=None, max_length=500)
 
 
 class AuthResponse(BaseModel):

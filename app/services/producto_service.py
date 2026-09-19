@@ -10,9 +10,11 @@ from app.models.producto import Producto
 from app.repositories.producto_repository import (
     get_producto,
     get_producto_by_slug,
+    get_imagen_producto_url,
     get_producto_imagen_url,
     get_productos,
 )
+from app.repositories.reserva_stock_repository import cantidades_reservadas, cantidades_reservadas_por_talle
 
 
 # =========================================================
@@ -37,6 +39,23 @@ def get_producto_imagen_service(
     )
 
 
+def get_imagen_producto_service(
+    db: Session,
+    producto_id: int,
+    imagen_id: int,
+) -> tuple[bytes, str] | None:
+    imagen_url = get_imagen_producto_url(
+        db=db,
+        producto_id=producto_id,
+        imagen_id=imagen_id,
+    )
+
+    if imagen_url is None:
+        return None
+
+    return DuxClient().get_imagen(imagen_url)
+
+
 # =========================================================
 # PRECIOS DEL CATÁLOGO MAYORISTA
 # =========================================================
@@ -44,6 +63,7 @@ def get_producto_imagen_service(
 def aplicar_datos_catalogo(
     producto: Producto,
     mostrar_precios: bool = True,
+    reserva_local: Decimal = Decimal("0.00"),
 ) -> Producto:
 
     precios_por_lista = {
@@ -79,7 +99,7 @@ def aplicar_datos_catalogo(
     )
 
     producto.stock_disponible = max(
-        stock_disponible,
+        stock_disponible - reserva_local,
         Decimal("0.00"),
     )
     producto.tiene_stock = (
@@ -107,9 +127,14 @@ def get_producto_service(
     if producto is None:
         return None
 
-    return aplicar_datos_catalogo(
-        producto, mostrar_precios
+    producto = aplicar_datos_catalogo(
+        producto,
+        mostrar_precios,
+        Decimal(cantidades_reservadas(db, {producto.id}).get(producto.id, 0)),
     )
+    reservas_talle = cantidades_reservadas_por_talle(db, {producto.id})
+    producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
+    return producto
 
 
 # =========================================================
@@ -130,9 +155,14 @@ def get_producto_by_slug_service(
     if producto is None:
         return None
 
-    return aplicar_datos_catalogo(
-        producto, mostrar_precios
+    producto = aplicar_datos_catalogo(
+        producto,
+        mostrar_precios,
+        Decimal(cantidades_reservadas(db, {producto.id}).get(producto.id, 0)),
     )
+    reservas_talle = cantidades_reservadas_por_talle(db, {producto.id})
+    producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
+    return producto
 
 
 # =========================================================
@@ -166,10 +196,15 @@ def get_productos_service(
         orden=orden,
     )
 
+    reservas = cantidades_reservadas(db, {producto.id for producto in productos})
+    reservas_talle = cantidades_reservadas_por_talle(db, {producto.id for producto in productos})
     for producto in productos:
         aplicar_datos_catalogo(
-            producto, mostrar_precios
+            producto,
+            mostrar_precios,
+            Decimal(reservas.get(producto.id, 0)),
         )
+        producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
 
     total_paginas = (
         ceil(total / limit)

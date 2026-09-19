@@ -1,4 +1,6 @@
 import time
+import re
+import httpx
 from app.integrations.dux.client import DuxClient
 from slugify import slugify
 from sqlalchemy import select, update
@@ -11,8 +13,56 @@ from datetime import date
 from app.models.producto import Producto
 from app.models.precio_producto import PrecioProducto
 from app.models.stock_producto import StockProducto
+from app.models.stock_talle_producto import StockTalleProducto
 from app.models.imagen_producto import ImagenProducto
+from app.repositories.reserva_stock_repository import reconciliar_reservas_enviadas
 from app.models.codigo_barra_producto import CodigoBarraProducto
+
+
+def _es_error_formato_items(error: httpx.HTTPStatusError) -> bool:
+    return error.response.status_code == 400 and "Formato desconocido" in error.response.text
+
+
+def _obtener_pagina_items_dux(dux: DuxClient, offset: int, limit: int) -> tuple[dict, list[int]]:
+    try:
+        return dux.get("v2/items", params={"limit": limit, "offset": offset}), []
+    except httpx.HTTPStatusError as error:
+        if not _es_error_formato_items(error):
+            raise
+
+    print(f"⚠️ La página offset={offset} contiene datos que Dux no puede formatear. Se consultará artículo por artículo.")
+    productos: list[dict] = []
+    omitidos: list[int] = []
+    total: int | None = None
+    for posicion in range(offset, offset + limit):
+        if total is not None and posicion >= total:
+            break
+        try:
+            respuesta = dux.get("v2/items", params={"limit": 1, "offset": posicion}, reintentos=1)
+            productos.extend(respuesta.get("datos") or [])
+            paginacion = respuesta.get("paginacion") or {}
+            if paginacion.get("total") is not None:
+                total = int(paginacion["total"])
+            if total is not None and posicion + 1 >= total:
+                break
+        except httpx.HTTPStatusError as error:
+            if not _es_error_formato_items(error):
+                raise
+            omitidos.append(posicion)
+            print(f"⚠️ Registro Dux omitido temporalmente en offset={posicion}: Formato desconocido.")
+        time.sleep(0.25)
+
+    if total is None:
+        raise RuntimeError("Dux no permitió determinar el total del catálogo al recuperar una página defectuosa.")
+    return {
+        "datos": productos,
+        "paginacion": {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "hay_mas": offset + limit < total,
+        },
+    }, omitidos
 
 
 def obtener_o_crear_categoria_desde_dux(
@@ -452,11 +502,9 @@ def sincronizar_producto_desde_dux(
     # STOCK
     # =====================================================
 
-    for stock_dux in (
-        producto_dux.get("stock")
-        or []
-    ):
-
+    stocks_dux = producto_dux.get("stock") or []
+    talles_dux: dict[int, int] = {}
+    for stock_dux in stocks_dux:
         stock = StockProducto(
             dux_id_deposito=stock_dux["id"],
             nombre_deposito=stock_dux["nombre"],
@@ -489,6 +537,22 @@ def sincronizar_producto_desde_dux(
         producto.stocks.append(
             stock
         )
+
+        valor_talle = str(stock_dux.get("talle") or "").strip()
+        coincidencia = re.fullmatch(r"(?:talle\s*)?([1-5])", valor_talle, flags=re.IGNORECASE)
+        if coincidencia:
+            talle = int(coincidencia.group(1))
+            talles_dux[talle] = talles_dux.get(talle, 0) + max(int(stock_dux.get("stock_disponible") or 0), 0)
+
+    # Solo Dux toma el control de los talles cuando realmente informa al menos
+    # uno válido. Un payload sin talles nunca borra la distribución manual.
+    if talles_dux:
+        existentes = {item.talle: item for item in producto.stocks_talles}
+        for talle in range(1, 6):
+            item = existentes.get(talle) or StockTalleProducto(producto=producto, talle=talle)
+            item.cantidad = talles_dux.get(talle, 0)
+            item.origen = "dux"
+            db.add(item)
 
     # =====================================================
     # CÓDIGOS DE BARRA
@@ -547,6 +611,10 @@ def sincronizar_catalogo_dux(
     procesados = 0
     errores = 0
     codigos_sincronizados: set[str] = set()
+    offsets_omitidos: list[int] = []
+    categorias_activas = set(db.scalars(select(Categoria.id).where(Categoria.activo.is_(True))).all())
+    subcategorias_activas = set(db.scalars(select(Subcategoria.id).where(Subcategoria.activo.is_(True))).all())
+    marcas_activas = set(db.scalars(select(Marca.id).where(Marca.activo.is_(True))).all())
 
     # Las categorías, subcategorías y marcas disponibles se
     # reconstruyen a partir del catálogo completo recibido.
@@ -574,14 +642,9 @@ def sincronizar_catalogo_dux(
             f"offset={offset} limit={limit}"
         )
 
-        respuesta = dux.get(
-            "v2/items",
-            params={
-                "id_empresa": dux.id_empresa,
-                "limit": limit,
-                "offset": offset,
-            },
-        )
+        respuesta, omitidos_pagina = _obtener_pagina_items_dux(dux, offset, limit)
+        offsets_omitidos.extend(omitidos_pagina)
+        errores += len(omitidos_pagina)
 
         productos_dux = respuesta.get(
             "datos",
@@ -664,36 +727,29 @@ def sincronizar_catalogo_dux(
             "los productos locales."
         )
 
-    # Un producto local que ya no aparece en el catálogo
-    # completo de Dux deja de publicarse, pero se conserva su
-    # historial en la base de datos.
-    productos_ausentes_query = update(
-        Producto
-    ).values(
-        habilitado=False
-    )
-
-    productos_ausentes_query = (
-        productos_ausentes_query.where(
-            Producto.dux_codigo.not_in(
-                codigos_sincronizados
-            )
+    deshabilitados_ausentes = 0
+    if not offsets_omitidos:
+        # Solo deshabilitamos ausentes cuando Dux entregó el catálogo completo.
+        resultado_ausentes = db.execute(
+            update(Producto)
+            .values(habilitado=False)
+            .where(Producto.dux_codigo.not_in(codigos_sincronizados))
         )
-    )
-
-    resultado_ausentes = db.execute(
-        productos_ausentes_query
-    )
-
-    filas_ausentes = resultado_ausentes.rowcount
-
-    deshabilitados_ausentes = max(
-        filas_ausentes or 0,
-        0,
-    )
+        deshabilitados_ausentes = max(resultado_ausentes.rowcount or 0, 0)
+    else:
+        # Un registro defectuoso no debe ocultar datos que estaban activos antes.
+        if categorias_activas:
+            db.execute(update(Categoria).where(Categoria.id.in_(categorias_activas)).values(activo=True))
+        if subcategorias_activas:
+            db.execute(update(Subcategoria).where(Subcategoria.id.in_(subcategorias_activas)).values(activo=True))
+        if marcas_activas:
+            db.execute(update(Marca).where(Marca.id.in_(marcas_activas)).values(activo=True))
 
     # Si cualquier página falla, esta confirmación no se
     # alcanza y el caller revierte toda la sincronización.
+    # Los pedidos web que Dux ya aceptó quedan incluidos en el stock reservado
+    # recién sincronizado. Dejamos de restarlos localmente para evitar un doble descuento.
+    reconciliar_reservas_enviadas(db)
     db.commit()
 
     return {
@@ -703,4 +759,5 @@ def sincronizar_catalogo_dux(
         "deshabilitados_ausentes": (
             deshabilitados_ausentes
         ),
+        "offsets_omitidos": offsets_omitidos,
     }
