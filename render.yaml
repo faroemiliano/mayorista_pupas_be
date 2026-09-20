@@ -25,6 +25,8 @@ services:
         sync: false
       - key: WHATSAPP_EMPRESA
         sync: false
+      - key: EMAIL_ADMIN
+        value: farixio.tech@gmail.com
       - key: CORS_ORIGINS
         sync: false
       - key: DUX_ESCRITURA_HABILITADA
