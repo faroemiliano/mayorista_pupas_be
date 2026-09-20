@@ -7,7 +7,7 @@ from app.database.session import get_db
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.repositories.usuario_repository import get_usuario_by_email
-from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,LoginRequest,RegistroRequest,RegistroResponse,UsuarioResponse
+from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,CambiarPasswordRequest,LoginRequest,RegistroRequest,RegistroResponse,UsuarioResponse
 from app.services.notificacion_service import notificar
 
 router=APIRouter(prefix="/api/auth",tags=["Autenticación"])
@@ -76,3 +76,11 @@ def actualizar_perfil(data:ActualizarPerfilRequest,db:Session=Depends(get_db),us
     usuario.canal_venta=data.canal_venta
     usuario.tienda_online_url=data.tienda_online_url.strip() if data.tienda_online_url else None
     db.commit();db.refresh(usuario);return usuario
+
+@router.patch("/me/password")
+def cambiar_password(data:CambiarPasswordRequest,db:Session=Depends(get_db),usuario:Usuario=Depends(require_cliente)):
+    if usuario.password_hash is None or not verificar_password(data.password_actual,usuario.password_hash):
+        raise HTTPException(status_code=400,detail="La contraseña actual es incorrecta.")
+    usuario.password_hash=hashear_password(data.password_nueva)
+    db.commit()
+    return {"mensaje":"Contraseña actualizada correctamente."}

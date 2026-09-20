@@ -66,6 +66,20 @@ class ActualizarPerfilRequest(BaseModel):
     tienda_online_url: str | None = Field(default=None, max_length=500)
 
 
+class CambiarPasswordRequest(BaseModel):
+    password_actual: str = Field(min_length=1, max_length=128)
+    password_nueva: str = Field(min_length=8, max_length=128)
+    confirmar_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validar_passwords(self):
+        if self.password_nueva != self.confirmar_password:
+            raise ValueError("Las contraseñas no coinciden.")
+        if self.password_actual == self.password_nueva:
+            raise ValueError("La nueva contraseña debe ser diferente de la actual.")
+        return self
+
+
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
