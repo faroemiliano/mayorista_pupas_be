@@ -26,7 +26,13 @@ services:
       - key: WHATSAPP_EMPRESA
         sync: false
       - key: EMAIL_ADMIN
-        value: farixio.tech@gmail.com
+        value: pupaokk@gmail.com
+      - key: WOOCOMMERCE_URL
+        value: https://pupasmayorista.com.ar
+      - key: WOOCOMMERCE_CONSUMER_KEY
+        sync: false
+      - key: WOOCOMMERCE_CONSUMER_SECRET
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: DUX_ESCRITURA_HABILITADA

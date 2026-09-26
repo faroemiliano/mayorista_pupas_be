@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     SMTP_REMITENTE: str = ""
     EMAIL_ADMIN: str = ""
     WHATSAPP_EMPRESA: str = ""
+    WOOCOMMERCE_URL: str = ""
+    WOOCOMMERCE_CONSUMER_KEY: str = ""
+    WOOCOMMERCE_CONSUMER_SECRET: str = ""
 
     @property
     def dux_personales_pedidos(self) -> list[int]:
