@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 
@@ -44,7 +44,15 @@ def obtener_estado_migracion(db) -> dict:
 def preparar_migracion_wordpress(db) -> dict:
     actual = obtener_estado_migracion(db)
     if actual.get("estado") == "en_progreso":
-        raise ValueError("La migración de WordPress ya está en progreso.")
+        fila = db.scalar(select(MigracionWooCommerce).where(
+            MigracionWooCommerce.tipo == TIPO_ESTADO,
+            MigracionWooCommerce.id_externo == ID_ESTADO,
+        ))
+        actualizado = fila.actualizado_en if fila else None
+        if actualizado and actualizado.tzinfo is None:
+            actualizado = actualizado.replace(tzinfo=timezone.utc)
+        if actualizado and datetime.now(timezone.utc) - actualizado < timedelta(minutes=2):
+            raise ValueError("La migración de WordPress ya está en progreso.")
     return _estado(
         db, estado="en_progreso", etapa="preparando", progreso=None, resultado=None, error=None,
         iniciada_en=datetime.now(timezone.utc).isoformat(), finalizada_en=None,
