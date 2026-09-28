@@ -53,6 +53,9 @@ class LoginRequest(BaseModel):
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
     password: str
 
+class EstadoEmailResponse(BaseModel):
+    requiere_migracion: bool
+
 class SolicitarResetPasswordRequest(BaseModel):
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
 

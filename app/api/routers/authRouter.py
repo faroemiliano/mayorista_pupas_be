@@ -10,7 +10,7 @@ from app.database.session import get_db
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.repositories.usuario_repository import get_usuario_by_email
-from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,CambiarPasswordRequest,CompletarMigracionPasswordRequest,LoginRequest,RegistroRequest,RegistroResponse,RestablecerPasswordRequest,SolicitarResetPasswordRequest,UsuarioResponse
+from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,CambiarPasswordRequest,CompletarMigracionPasswordRequest,EstadoEmailResponse,LoginRequest,RegistroRequest,RegistroResponse,RestablecerPasswordRequest,SolicitarResetPasswordRequest,UsuarioResponse
 from app.core.config import settings
 from app.services.notificacion_service import notificar
 
@@ -93,6 +93,11 @@ def login(data:LoginRequest,db:Session=Depends(get_db)):
         )
     usuario.ultimo_acceso_en=datetime.now(timezone.utc);db.commit()
     return {"access_token":crear_token(usuario),"usuario":usuario}
+
+@router.post("/estado-email", response_model=EstadoEmailResponse)
+def estado_email(data: SolicitarResetPasswordRequest, db: Session = Depends(get_db)):
+    usuario = get_usuario_by_email(db, data.email.strip().lower())
+    return {"requiere_migracion": bool(usuario and usuario.activo and usuario.requiere_migracion_password)}
 
 @router.post("/completar-migracion-password",response_model=AuthResponse)
 def completar_migracion_password(data:CompletarMigracionPasswordRequest,db:Session=Depends(get_db)):
