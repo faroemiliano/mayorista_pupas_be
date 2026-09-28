@@ -38,7 +38,11 @@ def obtener_estado_migracion(db) -> dict:
         MigracionWooCommerce.tipo == TIPO_ESTADO,
         MigracionWooCommerce.id_externo == ID_ESTADO,
     ))
-    return fila.datos if fila else {"estado": "pendiente", "etapa": None, "resultado": None, "error": None}
+    if not fila:
+        return {"estado": "pendiente", "etapa": None, "resultado": None, "error": None, "actualizado_en": None}
+    datos = dict(fila.datos)
+    datos["actualizado_en"] = fila.actualizado_en.isoformat() if fila.actualizado_en else None
+    return datos
 
 
 def preparar_migracion_wordpress(db) -> dict:
