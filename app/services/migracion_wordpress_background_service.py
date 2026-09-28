@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.database.session import SessionLocal
 from app.models.categoria import Categoria
@@ -74,11 +74,14 @@ def _activar_catalogo_wordpress(db) -> int:
 def ejecutar_migracion_wordpress_background() -> None:
     with SessionLocal() as db:
         try:
+            def cantidad(tipo: str) -> int:
+                return db.scalar(select(func.count(MigracionWooCommerce.id)).where(MigracionWooCommerce.tipo == tipo)) or 0
+
             _estado(db, etapa="categorias", progreso=None)
-            categorias = importar_todas_categorias(db)
+            categorias = {"omitido": True, "existentes": cantidad("categoria")} if cantidad("categoria") >= 10 else importar_todas_categorias(db)
 
             _estado(db, etapa="productos", progreso={"procesados": 0})
-            productos = importar_todos_productos(
+            productos = {"omitido": True, "existentes": cantidad("producto")} if cantidad("producto") >= 500 else importar_todos_productos(
                 db,
                 progreso=lambda _pagina, _paginas, _producto, total: (
                     _estado(db, progreso=total) if total["procesados"] % 50 == 0 else None
@@ -86,7 +89,7 @@ def ejecutar_migracion_wordpress_background() -> None:
             )
 
             _estado(db, etapa="clientes_y_pedidos", progreso={"procesados": 0})
-            staging = importar_todos_clientes_y_pedidos(
+            staging = {"omitido": True, "clientes": cantidad("cliente"), "pedidos": cantidad("pedido")} if cantidad("cliente") >= 5000 and cantidad("pedido") >= 10000 else importar_todos_clientes_y_pedidos(
                 db,
                 progreso=lambda tipo, pagina, paginas, total: _estado(
                     db, progreso={"tipo": tipo, "pagina": pagina, "paginas": paginas, **total}

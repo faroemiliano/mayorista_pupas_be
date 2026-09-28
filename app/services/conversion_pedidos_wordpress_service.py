@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from app.models.migracion_woocommerce import MigracionWooCommerce
@@ -83,27 +83,30 @@ def convertir_pedidos_wordpress(db: Session, progreso=None) -> dict:
                 resultado["pedidos_sin_cuenta"] += 1
 
             db.execute(delete(PedidoItemHistoricoWordpress).where(PedidoItemHistoricoWordpress.pedido_id == pedido.id))
+            items_para_insertar = []
             for item in datos.get("line_items") or []:
                 wordpress_product_id = int(item.get("product_id") or 0)
                 producto_id = productos.get(wordpress_product_id)
                 if producto_id is None:
                     resultado["items_sin_producto"] += 1
-                db.add(PedidoItemHistoricoWordpress(
-                    pedido_id=pedido.id,
-                    wordpress_id=int(item.get("id") or 0),
-                    wordpress_product_id=wordpress_product_id,
-                    wordpress_variation_id=int(item.get("variation_id") or 0),
-                    producto_id=producto_id,
-                    nombre=str(item.get("name") or "Producto histórico"),
-                    sku=(item.get("sku") or "").strip() or None,
-                    cantidad=int(item.get("quantity") or 0),
-                    subtotal=_decimal(item.get("subtotal")),
-                    total=_decimal(item.get("total")),
-                    impuesto_total=_decimal(item.get("total_tax")),
-                    precio_unitario=_decimal(item.get("price")),
-                    metadatos=item.get("meta_data") or [],
-                ))
+                items_para_insertar.append({
+                    "pedido_id": pedido.id,
+                    "wordpress_id": int(item.get("id") or 0),
+                    "wordpress_product_id": wordpress_product_id,
+                    "wordpress_variation_id": int(item.get("variation_id") or 0),
+                    "producto_id": producto_id,
+                    "nombre": str(item.get("name") or "Producto histórico"),
+                    "sku": (item.get("sku") or "").strip() or None,
+                    "cantidad": int(item.get("quantity") or 0),
+                    "subtotal": _decimal(item.get("subtotal")),
+                    "total": _decimal(item.get("total")),
+                    "impuesto_total": _decimal(item.get("total_tax")),
+                    "precio_unitario": _decimal(item.get("price")),
+                    "metadatos": item.get("meta_data") or [],
+                })
                 resultado["items"] += 1
+            if items_para_insertar:
+                db.execute(insert(PedidoItemHistoricoWordpress), items_para_insertar)
             resultado["creados" if creado else "actualizados"] += 1
             resultado["procesados"] += 1
         db.commit()
