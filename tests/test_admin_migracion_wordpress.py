@@ -62,3 +62,19 @@ def test_admin_revisa_y_vincula_candidato_dudoso(client, db):
     assert vinculacion.status_code == 200, vinculacion.text
     assert vinculacion.json()["estado"] == "vinculado"
     assert client.get("/api/admin/migracion-wordpress/conciliacion-productos/dudosos").json()["total"] == 0
+
+
+def test_admin_inicia_importacion_protegida_en_segundo_plano(client, monkeypatch):
+    ejecutado = []
+    monkeypatch.setattr(
+        "app.api.routers.adminMigracionWordpressRouter.ejecutar_migracion_wordpress_background",
+        lambda: ejecutado.append(True),
+    )
+
+    response = client.post("/api/admin/migracion-wordpress/ejecutar", json={"confirmar": True})
+    assert response.status_code == 202, response.text
+    assert response.json()["estado"] == "en_progreso"
+    assert ejecutado == [True]
+    estado = client.get("/api/admin/migracion-wordpress/ejecucion")
+    assert estado.status_code == 200
+    assert estado.json()["etapa"] == "preparando"

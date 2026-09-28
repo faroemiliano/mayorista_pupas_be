@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -8,6 +8,11 @@ from app.database.session import get_db
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
 from app.services.conciliacion_productos_service import vincular_coincidencia_manual
+from app.services.migracion_wordpress_background_service import (
+    ejecutar_migracion_wordpress_background,
+    obtener_estado_migracion,
+    preparar_migracion_wordpress,
+)
 
 
 router = APIRouter(
@@ -20,6 +25,10 @@ router = APIRouter(
 class VincularProductoRequest(BaseModel):
     wordpress_id: int = Field(gt=0)
     dux_codigo: str = Field(min_length=1, max_length=100)
+
+
+class EjecutarMigracionRequest(BaseModel):
+    confirmar: bool
 
 
 def _texto(valor) -> str | None:
@@ -115,6 +124,25 @@ def obtener_resumen(db: Session = Depends(get_db)):
         "clientes": clientes,
         "pedidos": pedidos,
     }
+
+
+@router.get("/ejecucion")
+def estado_ejecucion(db: Session = Depends(get_db)):
+    return obtener_estado_migracion(db)
+
+
+@router.post("/ejecutar", status_code=status.HTTP_202_ACCEPTED)
+def ejecutar_migracion(
+    data: EjecutarMigracionRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+):
+    if not data.confirmar:
+        raise HTTPException(status_code=422, detail="Debe confirmarse la copia de WordPress.")
+    try:
+        estado_actual = preparar_migracion_wordpress(db)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(ejecutar_migracion_wordpress_background)
+    return estado_actual
 
 
 @router.get("/conciliacion-productos")
