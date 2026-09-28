@@ -16,3 +16,6 @@ from app.models.reserva_stock import ReservaStock
 from app.models.stock_talle_producto import StockTalleProducto
 from app.models.material_cliente import MaterialCliente
 from app.models.migracion_woocommerce import MigracionWooCommerce
+from app.models.variacion_producto import VariacionProducto
+from app.models.usuario_wordpress import UsuarioWordpress
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress

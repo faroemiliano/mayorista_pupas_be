@@ -392,17 +392,17 @@ def sincronizar_producto_desde_dux(
     # DATOS GENERALES
     # =====================================================
 
-    producto.nombre = nombre
+    conserva_catalogo_wordpress = producto.wordpress_id is not None
+    if not conserva_catalogo_wordpress:
+        producto.nombre = nombre
 
-    producto.codigo_externo = (
-        producto_dux.get("codigo_externo")
-        or None
-    )
+    if not conserva_catalogo_wordpress:
+        producto.codigo_externo = producto_dux.get("codigo_externo") or None
 
     # Dux no incluye actualmente la descripción en el
     # payload de items. Si la agrega, la sincronizamos sin
     # borrar contenido local cuando la clave no está.
-    if "descripcion" in producto_dux:
+    if not conserva_catalogo_wordpress and "descripcion" in producto_dux:
         producto.descripcion = (
             producto_dux.get("descripcion")
             or None
@@ -416,10 +416,8 @@ def sincronizar_producto_desde_dux(
         producto_dux.get("porc_iva")
     )
 
-    producto.imagen_url = (
-        producto_dux.get("imagen_url")
-        or None
-    )
+    if not conserva_catalogo_wordpress:
+        producto.imagen_url = producto_dux.get("imagen_url") or None
 
     producto.cantidad_unidades_por_bulto = (
         producto_dux.get(
@@ -445,17 +443,9 @@ def sincronizar_producto_desde_dux(
     else:
         producto.fecha_creacion_dux = None
 
-    producto.categoria_id = (
-        categoria.id
-        if categoria
-        else None
-    )
-
-    producto.subcategoria_id = (
-        subcategoria.id
-        if subcategoria
-        else None
-    )
+    if not conserva_catalogo_wordpress:
+        producto.categoria_id = categoria.id if categoria else None
+        producto.subcategoria_id = subcategoria.id if subcategoria else None
 
     producto.marca_id = (
         marca.id
@@ -470,7 +460,8 @@ def sincronizar_producto_desde_dux(
     producto.precios.clear()
     producto.stocks.clear()
     producto.codigos_barra.clear()
-    producto.imagenes.clear()
+    if not conserva_catalogo_wordpress:
+        producto.imagenes.clear()
 
     # Ejecutamos los DELETE antes de insertar
     # nuevamente los datos sincronizados.
@@ -503,7 +494,7 @@ def sincronizar_producto_desde_dux(
     # =====================================================
 
     stocks_dux = producto_dux.get("stock") or []
-    talles_dux: dict[int, int] = {}
+    talles_dux: dict[str, int] = {}
     for stock_dux in stocks_dux:
         stock = StockProducto(
             dux_id_deposito=stock_dux["id"],
@@ -539,18 +530,20 @@ def sincronizar_producto_desde_dux(
         )
 
         valor_talle = str(stock_dux.get("talle") or "").strip()
-        coincidencia = re.fullmatch(r"(?:talle\s*)?([1-5])", valor_talle, flags=re.IGNORECASE)
-        if coincidencia:
-            talle = int(coincidencia.group(1))
+        talle = re.sub(r"^talle\s*", "", valor_talle, flags=re.IGNORECASE).strip()
+        if talle:
             talles_dux[talle] = talles_dux.get(talle, 0) + max(int(stock_dux.get("stock_disponible") or 0), 0)
 
     # Solo Dux toma el control de los talles cuando realmente informa al menos
     # uno válido. Un payload sin talles nunca borra la distribución manual.
     if talles_dux:
         existentes = {item.talle: item for item in producto.stocks_talles}
-        for talle in range(1, 6):
+        for item in existentes.values():
+            if item.origen == "dux" and item.talle not in talles_dux:
+                item.cantidad = 0
+        for talle, cantidad in talles_dux.items():
             item = existentes.get(talle) or StockTalleProducto(producto=producto, talle=talle)
-            item.cantidad = talles_dux.get(talle, 0)
+            item.cantidad = cantidad
             item.origen = "dux"
             db.add(item)
 
@@ -580,7 +573,7 @@ def sincronizar_producto_desde_dux(
         "imagen_url"
     )
 
-    if imagen_url:
+    if imagen_url and not conserva_catalogo_wordpress:
 
         producto.imagenes.append(
             ImagenProducto(
@@ -619,12 +612,12 @@ def sincronizar_catalogo_dux(
     # Las categorías, subcategorías y marcas disponibles se
     # reconstruyen a partir del catálogo completo recibido.
     db.execute(
-        update(Categoria).values(
+        update(Categoria).where(Categoria.dux_id.is_not(None)).values(
             activo=False
         )
     )
     db.execute(
-        update(Subcategoria).values(
+        update(Subcategoria).where(Subcategoria.dux_id.is_not(None)).values(
             activo=False
         )
     )
@@ -733,7 +726,7 @@ def sincronizar_catalogo_dux(
         resultado_ausentes = db.execute(
             update(Producto)
             .values(habilitado=False)
-            .where(Producto.dux_codigo.not_in(codigos_sincronizados))
+            .where(Producto.dux_codigo.not_in(codigos_sincronizados), Producto.origen == "dux")
         )
         deshabilitados_ausentes = max(resultado_ausentes.rowcount or 0, 0)
     else:

@@ -23,6 +23,7 @@ def importar_cliente_woocommerce(db: Session, email: str) -> tuple[Usuario, bool
         password_temporal = secrets.token_urlsafe(16)
         usuario = Usuario(email=email, nombre="", rol="cliente")
         usuario.password_hash = hashear_password(password_temporal)
+        usuario.requiere_migracion_password = True
         db.add(usuario)
 
     nombre = (data.get("first_name") or billing.get("first_name") or data.get("username") or email.split("@", 1)[0]).strip()

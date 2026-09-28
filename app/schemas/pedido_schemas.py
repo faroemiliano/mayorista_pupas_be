@@ -36,7 +36,7 @@ class PedidoItemResponse(BaseModel):
     dux_codigo: str
     producto_nombre: str
     cantidad: int
-    talle: int | None
+    talle: str | None
     precio_mayorista: Decimal
     precio_unitario: Decimal
     subtotal_sin_descuento: Decimal
@@ -72,6 +72,9 @@ class PedidoResponse(BaseModel):
     error_sync_dux: str | None
     sincronizado_dux_en: datetime | None
     items: list[PedidoItemResponse]
+    origen: Literal["tienda", "wordpress"] = "tienda"
+    solo_lectura: bool = False
+    wordpress_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

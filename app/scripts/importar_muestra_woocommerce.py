@@ -12,8 +12,9 @@ def main() -> None:
     args = parser.parse_args()
     with SessionLocal() as db:
         resultados = importar_muestra(db, producto_id=args.producto_id, cliente_email=args.cliente_email, pedido_id=args.pedido_id)
-    for fila, creada in resultados:
-        print(f"{fila.tipo} {fila.id_externo}: {'creado' if creada else 'actualizado/verificado'} ({fila.checksum[:12]})")
+        resumen = [(fila.tipo, fila.id_externo, fila.checksum, creada) for fila, creada in resultados]
+    for tipo, id_externo, checksum, creada in resumen:
+        print(f"{tipo} {id_externo}: {'creado' if creada else 'actualizado/verificado'} ({checksum[:12]})")
 
 
 if __name__ == "__main__":

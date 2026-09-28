@@ -1,4 +1,6 @@
 from app.models.stock_talle_producto import StockTalleProducto
+from app.models.imagen_producto import ImagenProducto
+from app.models.producto import Producto
 from app.services.dux_sync_service import sincronizar_catalogo_dux, sincronizar_producto_desde_dux
 import httpx
 
@@ -40,13 +42,7 @@ def test_importa_y_suma_stock_por_talle_desde_dux(db):
 
     stock = {fila.talle: fila for fila in producto.stocks_talles}
 
-    assert {talle: stock[talle].cantidad for talle in range(1, 6)} == {
-        1: 5,
-        2: 4,
-        3: 0,
-        4: 0,
-        5: 0,
-    }
+    assert {talle: item.cantidad for talle, item in stock.items()} == {"1": 5, "2": 4}
     assert all(fila.origen == "dux" for fila in stock.values())
 
 
@@ -71,7 +67,33 @@ def test_preserva_talles_manuales_si_dux_no_informa_talles_validos(db):
     assert [(fila.talle, fila.cantidad, fila.origen) for fila in producto.stocks_talles] == [
         (1, 3, "manual"),
         (2, 6, "manual"),
+        ("Único", 12, "dux"),
     ]
+
+
+def test_producto_vinculado_preserva_presentacion_wordpress_al_actualizar_desde_dux(db):
+    producto = Producto(
+        wordpress_id=50, origen="wordpress_dux", dux_codigo="DUX-TALLES-1",
+        nombre="Nombre comercial WordPress", slug="nombre-comercial-wordpress",
+        descripcion="Descripción WordPress", imagen_url="https://wordpress.test/principal.jpg",
+    )
+    producto.imagenes.append(ImagenProducto(
+        url="https://wordpress.test/principal.jpg", orden=0, principal=True,
+    ))
+    db.add(producto)
+    db.flush()
+
+    datos_dux = _producto_dux([_stock("4", 7, 1)]) | {
+        "item": "Nombre interno Dux", "descripcion": "Descripción Dux",
+        "imagen_url": "https://dux.test/imagen.jpg",
+    }
+    sincronizar_producto_desde_dux(db, datos_dux)
+
+    assert producto.nombre == "Nombre comercial WordPress"
+    assert producto.descripcion == "Descripción WordPress"
+    assert producto.imagen_url == "https://wordpress.test/principal.jpg"
+    assert [imagen.url for imagen in producto.imagenes] == ["https://wordpress.test/principal.jpg"]
+    assert {stock.talle: stock.cantidad for stock in producto.stocks_talles} == {"4": 7}
 
 
 def test_catalogo_no_envia_id_empresa_al_listar_items(db, monkeypatch):
@@ -118,3 +140,15 @@ def test_catalogo_aisla_registro_que_dux_no_puede_formatear(db, monkeypatch):
     assert resultado["errores"] == 1
     assert resultado["offsets_omitidos"] == [1]
     assert resultado["deshabilitados_ausentes"] == 0
+
+
+def test_panel_bloquea_sincronizacion_dux_en_modo_wordpress(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DUX_SINCRONIZACION_HABILITADA", False)
+    configuracion = client.get("/api/admin/configuracion/dux")
+    assert configuracion.status_code == 200
+    assert configuracion.json()["modo"] == "wordpress"
+    assert configuracion.json()["sincronizacion_habilitada"] is False
+    assert client.post("/api/admin/productos/sincronizar").status_code == 409
+    assert client.post("/api/admin/clientes-dux/sincronizar").status_code == 409

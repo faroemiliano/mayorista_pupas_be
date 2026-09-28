@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     DUX_ID_DEPOSITO: int | None = None
     DUX_PERSONALES_PEDIDOS: str = "1051689,796900"
     DUX_ESCRITURA_HABILITADA: bool = False
+    DUX_SINCRONIZACION_HABILITADA: bool = False
     SMTP_HABILITADO: bool = False
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -32,6 +33,10 @@ class Settings(BaseSettings):
     WOOCOMMERCE_URL: str = ""
     WOOCOMMERCE_CONSUMER_KEY: str = ""
     WOOCOMMERCE_CONSUMER_SECRET: str = ""
+    FRONTEND_URL: str = "http://localhost:5173"
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Pupas Mayorista <onboarding@resend.dev>"
+    WORDPRESS_MIGRATION_SECRET: str = ""
 
     @property
     def dux_personales_pedidos(self) -> list[int]:

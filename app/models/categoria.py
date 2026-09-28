@@ -27,6 +27,8 @@ class Categoria(Base):
         index=True,
     )
 
+    wordpress_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+
     nombre: Mapped[str] = mapped_column(
         String(100),
         nullable=False,

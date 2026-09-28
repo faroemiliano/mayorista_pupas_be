@@ -1,10 +1,11 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database.session import get_db
 from app.core.security import require_admin
+from app.core.config import settings
 from app.schemas.admin_producto_schemas import ProductoAnaliticaResponse
 from app.services.admin_producto_service import get_analitica_productos_service
 from app.schemas.admin_cliente_schemas import EstadoSincronizacionDuxResponse
@@ -25,11 +26,15 @@ class VisibilidadProductoResponse(BaseModel):
     visible_tienda: bool
 
 class CantidadTalleRequest(BaseModel):
-    talle: int = Field(ge=1, le=5)
+    talle: str = Field(min_length=1, max_length=30)
     cantidad: int = Field(ge=0)
 
+    @field_validator("talle", mode="before")
+    @classmethod
+    def normalizar_talle(cls, valor): return str(valor).strip()
+
 class StockTallesRequest(BaseModel):
-    talles: list[CantidadTalleRequest] = Field(min_length=5, max_length=5)
+    talles: list[CantidadTalleRequest] = Field(min_length=1, max_length=30)
 
 @router.get("/stock-talles")
 def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Query(20,ge=1,le=100),db:Session=Depends(get_db)):
@@ -41,26 +46,27 @@ def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Qu
         query=query.where(filtro);count=count.where(filtro)
     total=db.scalar(count) or 0
     productos=db.scalars(query.order_by(Producto.nombre,Producto.id).offset((page-1)*limit).limit(limit)).all()
-    return {"items":[{"id":p.id,"codigo":p.dux_codigo,"nombre":p.nombre,"stock_dux":int(sum(s.stock_disponible for s in p.stocks)),"origen":next((s.origen for s in p.stocks_talles),"sin_configurar"),"talles":{str(i):next((s.cantidad for s in p.stocks_talles if s.talle==i),0) for i in range(1,6)}} for p in productos],"total":total,"page":page,"limit":limit,"total_paginas":((total+limit-1)//limit if total else 0)}
+    return {"items":[{"id":p.id,"codigo":p.dux_codigo,"nombre":p.nombre,"stock_dux":int(sum(s.stock_disponible for s in p.stocks)),"origen":next((s.origen for s in p.stocks_talles),"sin_configurar"),"talles":{s.talle:s.cantidad for s in p.stocks_talles}} for p in productos],"total":total,"page":page,"limit":limit,"total_paginas":((total+limit-1)//limit if total else 0)}
 
 @router.post("/{producto_id}/stock-talles")
 def guardar_stock_talles(producto_id:int,data:StockTallesRequest,db:Session=Depends(get_db)):
     from app.models.producto import Producto
     from app.models.stock_talle_producto import StockTalleProducto
     from app.repositories.reserva_stock_repository import cantidades_reservadas_por_talle
-    if {item.talle for item in data.talles}!={1,2,3,4,5}:raise HTTPException(422,"Deben informarse una vez los talles del 1 al 5.")
+    talles_limpios=[item.talle.strip() for item in data.talles]
+    if any(not talle for talle in talles_limpios) or len(set(talles_limpios))!=len(talles_limpios):raise HTTPException(422,"Los talles deben ser únicos y no pueden estar vacíos.")
     producto=db.scalar(select(Producto).options(selectinload(Producto.stocks),selectinload(Producto.stocks_talles)).where(Producto.id==producto_id).with_for_update())
     if producto is None:raise HTTPException(404,"Producto no encontrado.")
     stock_dux=int(sum(s.stock_disponible for s in producto.stocks))
     if sum(item.cantidad for item in data.talles)>stock_dux:raise HTTPException(422,f"La suma por talles no puede superar el stock Dux ({stock_dux}).")
     reservadas=cantidades_reservadas_por_talle(db,{producto_id})
     existentes={item.talle:item for item in producto.stocks_talles}
-    for item in data.talles:
-        if item.cantidad<reservadas.get((producto_id,item.talle),0):raise HTTPException(422,f"El talle {item.talle} tiene unidades reservadas y no puede reducirse a esa cantidad.")
-        fila=existentes.get(item.talle) or StockTalleProducto(producto_id=producto_id,talle=item.talle)
+    for item,talle in zip(data.talles,talles_limpios):
+        if item.cantidad<reservadas.get((producto_id,talle),0):raise HTTPException(422,f"El talle {talle} tiene unidades reservadas y no puede reducirse a esa cantidad.")
+        fila=existentes.get(talle) or StockTalleProducto(producto_id=producto_id,talle=talle)
         fila.cantidad=item.cantidad;fila.origen="manual";db.add(fila)
     db.commit()
-    return {"id":producto_id,"stock_dux":stock_dux,"total_distribuido":sum(item.cantidad for item in data.talles),"talles":{str(item.talle):item.cantidad for item in data.talles}}
+    return {"id":producto_id,"stock_dux":stock_dux,"total_distribuido":sum(item.cantidad for item in data.talles),"talles":{talle:item.cantidad for item,talle in zip(data.talles,talles_limpios)}}
 
 @router.patch("/{producto_id}/visibilidad",response_model=VisibilidadProductoResponse)
 def cambiar_visibilidad(producto_id:int,data:VisibilidadProductoRequest,db:Session=Depends(get_db)):
@@ -85,6 +91,8 @@ def sincronizar_catalogo(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    if not settings.DUX_SINCRONIZACION_HABILITADA:
+        raise HTTPException(status_code=409, detail="La sincronización con Dux está pausada mientras la tienda funciona con la copia de WordPress.")
     try:
         estado = preparar_sincronizacion_catalogo(db)
     except ValueError as error:

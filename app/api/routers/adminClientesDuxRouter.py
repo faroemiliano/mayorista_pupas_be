@@ -3,6 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
+from app.core.config import settings
 from app.database.session import get_db
 from app.schemas.admin_cliente_schemas import ClientesDuxListadoResponse, ClientesDuxTotalResponse, EstadoSincronizacionDuxResponse
 from app.services.admin_cliente_dux_service import contar_clientes_dux, listar_clientes_dux
@@ -28,6 +29,8 @@ def estado_sincronizacion(db: Session = Depends(get_db)):
 
 @router.post("/sincronizar", response_model=EstadoSincronizacionDuxResponse, status_code=status.HTTP_202_ACCEPTED)
 def sincronizar(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    if not settings.DUX_SINCRONIZACION_HABILITADA:
+        raise HTTPException(status_code=409, detail="La sincronización con Dux está pausada mientras la tienda funciona con la copia de WordPress.")
     try:
         estado = preparar_sincronizacion(db)
     except ValueError as error:

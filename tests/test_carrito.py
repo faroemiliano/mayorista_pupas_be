@@ -291,7 +291,7 @@ def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, 
     assert data["cantidad_productos_diferentes"] == 1
     assert data["cantidad_unidades"] == 6
     assert data["cumple_compra_minima"] is True
-    assert {(item["talle"], item["cantidad"]) for item in data["items"]} == {(1, 2), (2, 4)}
+    assert {(item["talle"], item["cantidad"]) for item in data["items"]} == {("1", 2), ("2", 4)}
 
     assert client.post(
         "/api/carrito/calcular",

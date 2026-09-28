@@ -1,5 +1,7 @@
 from decimal import Decimal
+from datetime import datetime, timezone
 
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
@@ -94,6 +96,38 @@ def test_analitica_no_cuenta_pedidos_cancelados(client, db):
     data = client.get("/api/admin/productos/analitica").json()
     assert data["resumen"]["unidades_vendidas"] == 0
     assert data["resumen"]["productos_con_ventas"] == 0
+
+
+def test_analitica_incluye_historial_wordpress(client, db):
+    producto = crear_producto(db, 30)
+    pedido = PedidoHistoricoWordpress(
+        wordpress_id=9001,
+        numero="9001",
+        wordpress_customer_id=0,
+        estado="completed",
+        total=Decimal("6000"),
+        creado_en_wordpress=datetime.now(timezone.utc),
+    )
+    pedido.items.append(PedidoItemHistoricoWordpress(
+        wordpress_id=9101,
+        wordpress_product_id=123,
+        producto_id=producto.id,
+        nombre=producto.nombre,
+        cantidad=3,
+        subtotal=Decimal("6000"),
+        total=Decimal("6000"),
+        impuesto_total=0,
+        precio_unitario=Decimal("2000"),
+    ))
+    db.add(pedido)
+    db.commit()
+
+    data = client.get("/api/admin/productos/analitica?dias=30&limit=10").json()
+    assert data["resumen"]["unidades_vendidas"] == 3
+    assert data["resumen"]["productos_con_ventas"] == 1
+    assert data["mas_vendidos"][0]["producto_id"] == producto.id
+    assert sum(punto["pedidos"] for punto in data["serie_ventas"]) == 1
+    assert sum(punto["unidades"] for punto in data["serie_ventas"]) == 3
 
 
 def test_admin_puede_ocultar_producto_solo_en_la_tienda(client, db):

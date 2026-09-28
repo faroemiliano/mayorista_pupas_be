@@ -35,6 +35,8 @@ class Subcategoria(Base):
         index=True,
     )
 
+    wordpress_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+
     categoria_id: Mapped[int] = mapped_column(
         ForeignKey(
             "categorias.id",

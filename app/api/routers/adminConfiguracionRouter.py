@@ -14,6 +14,7 @@ router = APIRouter(
 
 class EstadoDuxResponse(BaseModel):
     escritura_habilitada: bool
+    sincronizacion_habilitada: bool
     modo: str
 
 
@@ -22,5 +23,6 @@ def estado_dux():
     habilitada = settings.DUX_ESCRITURA_HABILITADA
     return {
         "escritura_habilitada": habilitada,
-        "modo": "produccion" if habilitada else "desarrollo",
+        "sincronizacion_habilitada": settings.DUX_SINCRONIZACION_HABILITADA,
+        "modo": "produccion" if habilitada else "wordpress",
     }

@@ -89,7 +89,7 @@ class ImagenProductoResponse(BaseModel):
     )
 
 class StockTalleResponse(BaseModel):
-    talle: int
+    talle: str
     cantidad: int
     disponible: int
     model_config = ConfigDict(from_attributes=True)

@@ -20,6 +20,7 @@ from app.services.pedido_service import (
     PedidoError,
     actualizar_estado_pedido_service,
     crear_pedido_service,
+    get_pedidos_admin_service,
     get_pedidos_service,
 )
 
@@ -56,7 +57,8 @@ def obtener_pedido(codigo: str, db: Session = Depends(get_db), usuario: Usuario 
 
 @admin_router.get("/", response_model=PedidoListadoResponse)
 def listar_pedidos_admin(
-    estado: PedidoEstado | None = None,
+    estado: str | None = Query(default=None, max_length=40),
+    origen: str = Query(default="todos", pattern="^(todos|tienda|wordpress)$"),
     buscar: str | None = Query(default=None, max_length=150),
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
@@ -65,11 +67,12 @@ def listar_pedidos_admin(
     db: Session = Depends(get_db),
 ):
     try:
-        return get_pedidos_service(
+        return get_pedidos_admin_service(
             db, estado, page, limit,
             buscar=buscar,
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
+            origen=origen,
         )
     except PedidoError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

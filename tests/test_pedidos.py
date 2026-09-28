@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from tests.test_carrito import crear_producto
 from app.models.reserva_stock import ReservaStock
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 
 
 def pedido_payload(producto_id: int, cantidad: int = 24) -> dict:
@@ -122,6 +123,33 @@ def test_admin_lista_y_actualiza_estado_del_pedido(
     )
     assert actualizado.status_code == 200
     assert actualizado.json()["estado"] == "confirmado"
+
+
+def test_admin_lista_pedidos_historicos_wordpress_como_solo_lectura(client: TestClient, db: Session):
+    historico = PedidoHistoricoWordpress(
+        wordpress_id=7001, numero="7001", wordpress_customer_id=10,
+        estado="completed", total=Decimal("12500"),
+        facturacion={"first_name": "María", "last_name": "Pérez", "email": "maria@test.local", "phone": "3415550000"},
+        envio={"address_1": "Calle Histórica 10", "city": "Rosario", "state": "Santa Fe"},
+        creado_en_wordpress=datetime.now(timezone.utc),
+    )
+    historico.items.append(PedidoItemHistoricoWordpress(
+        wordpress_id=7101, wordpress_product_id=50, producto_id=None,
+        nombre="Pijama histórico", sku="WP-50", cantidad=2,
+        subtotal=Decimal("12500"), total=Decimal("12500"), impuesto_total=0,
+        precio_unitario=Decimal("6250"), metadatos=[{"display_key": "Talle", "display_value": "4"}],
+    ))
+    db.add(historico)
+    db.commit()
+
+    response = client.get("/api/admin/pedidos/", params={"origen": "wordpress"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["codigo"] == "WP-7001"
+    assert data["items"][0]["origen"] == "wordpress"
+    assert data["items"][0]["solo_lectura"] is True
+    assert data["items"][0]["items"][0]["talle"] == "4"
 
 
 def test_crear_pedido_reserva_stock_y_evitar_sobreventa(

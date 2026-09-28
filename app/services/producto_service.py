@@ -1,5 +1,8 @@
 from math import ceil
 from decimal import Decimal
+from urllib.parse import urlsplit
+
+import httpx
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +18,49 @@ from app.repositories.producto_repository import (
     get_productos,
 )
 from app.repositories.reserva_stock_repository import cantidades_reservadas, cantidades_reservadas_por_talle
+
+
+def _orden_talle(talle: str) -> tuple[int, float, str]:
+    try:
+        return (0, float(talle.replace(",", ".")), "")
+    except ValueError:
+        orden_letras = {"S": 0, "M": 1, "L": 2, "XL": 3, "XXL": 4}
+        normalizado = talle.strip().upper()
+        return (1, float(orden_letras.get(normalizado, 999)), normalizado)
+
+
+def _talles_catalogo(producto: Producto, reservas_talle: dict) -> list[dict]:
+    return [
+        {
+            "talle": item.talle,
+            "cantidad": item.cantidad,
+            "disponible": max(item.cantidad - reservas_talle.get((producto.id, item.talle), 0), 0),
+        }
+        for item in sorted(producto.stocks_talles, key=lambda item: _orden_talle(item.talle))
+    ]
+
+
+def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
+    parsed = urlsplit(url)
+    wordpress_host = urlsplit(settings.WOOCOMMERCE_URL).hostname
+    if parsed.scheme == "https" and parsed.hostname == wordpress_host:
+        response = httpx.get(url, timeout=30.0)
+        response.raise_for_status()
+        contenido = response.content
+        if len(contenido) > 15 * 1024 * 1024:
+            raise ValueError("La imagen supera el tamaño permitido.")
+        if contenido.startswith(b"\xff\xd8\xff"):
+            media_type = "image/jpeg"
+        elif contenido.startswith(b"\x89PNG\r\n\x1a\n"):
+            media_type = "image/png"
+        elif contenido.startswith((b"GIF87a", b"GIF89a")):
+            media_type = "image/gif"
+        elif contenido.startswith(b"RIFF") and contenido[8:12] == b"WEBP":
+            media_type = "image/webp"
+        else:
+            raise ValueError("Formato de imagen WordPress no soportado.")
+        return contenido, media_type
+    return DuxClient().get_imagen(url)
 
 
 # =========================================================
@@ -34,9 +80,7 @@ def get_producto_imagen_service(
     if imagen_url is None:
         return None
 
-    return DuxClient().get_imagen(
-        imagen_url
-    )
+    return _obtener_imagen_catalogo(imagen_url)
 
 
 def get_imagen_producto_service(
@@ -53,7 +97,7 @@ def get_imagen_producto_service(
     if imagen_url is None:
         return None
 
-    return DuxClient().get_imagen(imagen_url)
+    return _obtener_imagen_catalogo(imagen_url)
 
 
 # =========================================================
@@ -133,7 +177,7 @@ def get_producto_service(
         Decimal(cantidades_reservadas(db, {producto.id}).get(producto.id, 0)),
     )
     reservas_talle = cantidades_reservadas_por_talle(db, {producto.id})
-    producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
+    producto.talles = _talles_catalogo(producto, reservas_talle)
     return producto
 
 
@@ -161,7 +205,7 @@ def get_producto_by_slug_service(
         Decimal(cantidades_reservadas(db, {producto.id}).get(producto.id, 0)),
     )
     reservas_talle = cantidades_reservadas_por_talle(db, {producto.id})
-    producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
+    producto.talles = _talles_catalogo(producto, reservas_talle)
     return producto
 
 
@@ -204,7 +248,7 @@ def get_productos_service(
             mostrar_precios,
             Decimal(reservas.get(producto.id, 0)),
         )
-        producto.talles = [{"talle": item.talle, "cantidad": item.cantidad, "disponible": max(item.cantidad-reservas_talle.get((producto.id,item.talle),0),0)} for item in producto.stocks_talles]
+        producto.talles = _talles_catalogo(producto, reservas_talle)
 
     total_paginas = (
         ceil(total / limit)

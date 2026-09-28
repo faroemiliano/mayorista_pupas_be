@@ -53,6 +53,30 @@ class LoginRequest(BaseModel):
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
     password: str
 
+class SolicitarResetPasswordRequest(BaseModel):
+    email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
+
+class RestablecerPasswordRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=500)
+    password: str = Field(min_length=8, max_length=128)
+    confirmar_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validar_passwords(self):
+        if self.password != self.confirmar_password: raise ValueError("Las contraseñas no coinciden.")
+        return self
+
+class CompletarMigracionPasswordRequest(BaseModel):
+    email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
+    password_anterior: str = Field(min_length=1, max_length=128)
+    password_nueva: str = Field(min_length=8, max_length=128)
+    confirmar_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validar_passwords(self):
+        if self.password_nueva != self.confirmar_password: raise ValueError("Las contraseñas no coinciden.")
+        return self
+
 
 class ActualizarPerfilRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)

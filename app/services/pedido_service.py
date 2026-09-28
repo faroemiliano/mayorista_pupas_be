@@ -14,6 +14,8 @@ from app.repositories.pedido_repository import (
     get_pedido,
     get_pedido_by_codigo,
     get_pedidos,
+    get_pedidos_por_referencias,
+    get_referencias_pedidos_admin,
 )
 from app.schemas.carrito_schemas import CarritoCalcularRequest
 from app.schemas.pedido_schemas import PedidoCreateRequest
@@ -126,6 +128,85 @@ def get_pedidos_service(
         "limit": limit,
         "total_paginas": ceil(total / limit) if total else 0,
     }
+
+
+def _valor(datos: dict, clave: str, respaldo: str = "") -> str:
+    return str(datos.get(clave) or respaldo or "")
+
+
+def _talle_historico(metadatos: list) -> str | None:
+    for dato in metadatos or []:
+        nombre = str(dato.get("display_key") or dato.get("key") or "").lower()
+        if any(token in nombre for token in ("talle", "talla", "size")):
+            return str(dato.get("display_value") or dato.get("value") or "") or None
+    return None
+
+
+def _serializar_pedido_historico(pedido) -> dict:
+    facturacion = pedido.facturacion or {}
+    envio = pedido.envio or {}
+    usuario = pedido.usuario
+    nombre = " ".join(filter(None, [facturacion.get("first_name"), facturacion.get("last_name")])).strip()
+    if not nombre and usuario:
+        nombre = f"{usuario.nombre} {usuario.apellido}".strip()
+    direccion = _valor(envio, "address_1", _valor(facturacion, "address_1"))
+    localidad = _valor(envio, "city", _valor(facturacion, "city"))
+    provincia = _valor(envio, "state", _valor(facturacion, "state"))
+    items = [{
+        "id": item.id,
+        "producto_id": item.producto_id,
+        "dux_codigo": item.sku or "",
+        "producto_nombre": item.nombre,
+        "cantidad": item.cantidad,
+        "talle": _talle_historico(item.metadatos),
+        "precio_mayorista": item.precio_unitario or 0,
+        "precio_unitario": item.precio_unitario or 0,
+        "subtotal_sin_descuento": item.subtotal,
+        "descuento_aplicado": max(item.subtotal - item.total, 0),
+        "subtotal": item.total,
+    } for item in pedido.items]
+    return {
+        "id": pedido.id, "codigo": f"WP-{pedido.numero}", "estado": pedido.estado,
+        "cliente_nombre": nombre or "Cliente histórico",
+        "cliente_telefono": _valor(facturacion, "phone", usuario.telefono if usuario else ""),
+        "cliente_email": _valor(facturacion, "email", usuario.email if usuario else "") or None,
+        "provincia": provincia, "localidad": localidad, "direccion": direccion,
+        "observaciones": None,
+        "cantidad_productos_diferentes": len(items),
+        "cantidad_unidades": sum(item["cantidad"] for item in items),
+        "aplica_precio_24_productos": False,
+        "subtotal_sin_descuento": sum(item["subtotal_sin_descuento"] for item in items),
+        "descuento_aplicado": pedido.descuento_total,
+        "total": pedido.total,
+        "creado_en": pedido.creado_en_wordpress, "actualizado_en": pedido.creado_en_wordpress,
+        "dux_id_pedido": None, "dux_nro_pedido": None, "dux_id_personal": None,
+        "estado_sync_dux": "historico", "error_sync_dux": None, "sincronizado_dux_en": None,
+        "items": items, "origen": "wordpress", "solo_lectura": True,
+        "wordpress_id": pedido.wordpress_id,
+    }
+
+
+def get_pedidos_admin_service(
+    db: Session, estado: str | None, page: int, limit: int, buscar: str | None = None,
+    fecha_desde: date | None = None, fecha_hasta: date | None = None, origen: str = "todos",
+) -> dict:
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise PedidoError("La fecha desde no puede ser posterior a la fecha hasta.")
+    if origen not in {"todos", "tienda", "wordpress"}:
+        raise PedidoError("El origen de pedidos no es válido.")
+    zona_local = ZoneInfo("America/Argentina/Buenos_Aires")
+    desde_dt = datetime.combine(fecha_desde, time.min, zona_local) if fecha_desde else None
+    hasta_dt = datetime.combine(fecha_hasta + timedelta(days=1), time.min, zona_local) if fecha_hasta else None
+    referencias, total = get_referencias_pedidos_admin(
+        db, estado, page, limit, buscar, desde_dt, hasta_dt, origen,
+    )
+    pedidos = get_pedidos_por_referencias(db, referencias)
+    items = [
+        _serializar_pedido_historico(pedido) if referencia[0] == "wordpress" else pedido
+        for referencia, pedido in zip(referencias, pedidos)
+    ]
+    return {"items": items, "total": total, "page": page, "limit": limit,
+            "total_paginas": ceil(total / limit) if total else 0}
 
 
 def actualizar_estado_pedido_service(db: Session, pedido_id: int, estado: str) -> Pedido | None:

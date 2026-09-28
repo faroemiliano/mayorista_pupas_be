@@ -40,7 +40,7 @@ class PedidoItem(Base):
     cantidad: Mapped[int] = mapped_column(
         nullable=False,
     )
-    talle: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    talle: Mapped[str | None] = mapped_column(String(30), nullable=True)
     precio_mayorista: Mapped[Decimal] = mapped_column(
         Numeric(14, 2),
         nullable=False,

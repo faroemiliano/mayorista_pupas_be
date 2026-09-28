@@ -100,7 +100,7 @@ def get_analitica_productos_service(
 
     return {
         "origen": "pedidos_tienda",
-        "alcance": "Incluye pedidos de esta tienda, excepto los cancelados. No incluye todavía ventas históricas de Dux.",
+        "alcance": "Incluye el historial migrado de WordPress y los pedidos nuevos de esta tienda, excepto los cancelados. No incluye ventas externas registradas solamente en Dux.",
         "dias": dias,
         "desde": desde,
         "hasta": hasta,

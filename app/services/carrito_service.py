@@ -45,10 +45,10 @@ def calcular_carrito_service(
     carrito: CarritoCalcularRequest,
 ) -> dict:
 
-    cantidades: dict[tuple[int, int], int] = defaultdict(int)
+    cantidades: dict[tuple[int, str], int] = defaultdict(int)
 
     for item in carrito.items:
-        cantidades[(item.producto_id, item.talle)] += (
+        cantidades[(item.producto_id, item.talle.strip())] += (
             item.cantidad
         )
 

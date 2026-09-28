@@ -1,9 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.pedido import Pedido
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress
+from app.models.usuario import Usuario
 
 
 def get_pedido_by_codigo(db: Session, codigo: str) -> Pedido | None:
@@ -75,3 +77,86 @@ def get_pedidos(
         list(db.scalars(query).all()),
         db.scalar(count_query) or 0,
     )
+
+
+def get_referencias_pedidos_admin(
+    db: Session,
+    estado: str | None,
+    page: int,
+    limit: int,
+    buscar: str | None = None,
+    fecha_desde: datetime | None = None,
+    fecha_hasta: datetime | None = None,
+    origen: str = "todos",
+) -> tuple[list[tuple[str, int]], int]:
+    consultas = []
+    if origen in ("todos", "tienda"):
+        tienda = select(
+            literal("tienda").label("origen"),
+            Pedido.id.label("id"),
+            Pedido.creado_en.label("fecha"),
+        )
+        if estado:
+            tienda = tienda.where(Pedido.estado == estado)
+        if buscar and (termino := buscar.strip()):
+            patron = f"%{termino}%"
+            tienda = tienda.where(or_(
+                Pedido.codigo.ilike(patron), Pedido.cliente_nombre.ilike(patron),
+                Pedido.cliente_email.ilike(patron), Pedido.cliente_telefono.ilike(patron),
+                cast(Pedido.id, String).ilike(patron),
+            ))
+        if fecha_desde is not None:
+            tienda = tienda.where(Pedido.creado_en >= fecha_desde)
+        if fecha_hasta is not None:
+            tienda = tienda.where(Pedido.creado_en < fecha_hasta)
+        consultas.append(tienda)
+
+    if origen in ("todos", "wordpress"):
+        wordpress = select(
+            literal("wordpress").label("origen"),
+            PedidoHistoricoWordpress.id.label("id"),
+            PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
+        ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id)
+        if estado:
+            wordpress = wordpress.where(PedidoHistoricoWordpress.estado == estado)
+        if buscar and (termino := buscar.strip()):
+            patron = f"%{termino}%"
+            wordpress = wordpress.where(or_(
+                PedidoHistoricoWordpress.numero.ilike(patron),
+                cast(PedidoHistoricoWordpress.wordpress_id, String).ilike(patron),
+                Usuario.nombre.ilike(patron), Usuario.apellido.ilike(patron),
+                Usuario.email.ilike(patron), Usuario.telefono.ilike(patron),
+            ))
+        if fecha_desde is not None:
+            wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= fecha_desde)
+        if fecha_hasta is not None:
+            wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < fecha_hasta)
+        consultas.append(wordpress)
+
+    combinada = union_all(*consultas).subquery()
+    total = db.scalar(select(func.count()).select_from(combinada)) or 0
+    filas = db.execute(
+        select(combinada.c.origen, combinada.c.id)
+        .order_by(combinada.c.fecha.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    ).all()
+    return [(fila.origen, fila.id) for fila in filas], total
+
+
+def get_pedidos_por_referencias(db: Session, referencias: list[tuple[str, int]]) -> list[Pedido | PedidoHistoricoWordpress]:
+    ids_tienda = [identificador for origen, identificador in referencias if origen == "tienda"]
+    ids_wordpress = [identificador for origen, identificador in referencias if origen == "wordpress"]
+    tienda = {
+        pedido.id: pedido for pedido in db.scalars(
+            select(Pedido).options(selectinload(Pedido.items)).where(Pedido.id.in_(ids_tienda))
+        ).all()
+    } if ids_tienda else {}
+    wordpress = {
+        pedido.id: pedido for pedido in db.scalars(
+            select(PedidoHistoricoWordpress)
+            .options(selectinload(PedidoHistoricoWordpress.items), selectinload(PedidoHistoricoWordpress.usuario))
+            .where(PedidoHistoricoWordpress.id.in_(ids_wordpress))
+        ).all()
+    } if ids_wordpress else {}
+    return [tienda[id_] if origen == "tienda" else wordpress[id_] for origen, id_ in referencias]

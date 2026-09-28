@@ -35,7 +35,7 @@ def cantidades_reservadas(db: Session, producto_ids: set[int]) -> dict[int, int]
     return {producto_id: int(cantidad) for producto_id, cantidad in filas}
 
 
-def cantidades_reservadas_por_talle(db: Session, producto_ids: set[int]) -> dict[tuple[int, int], int]:
+def cantidades_reservadas_por_talle(db: Session, producto_ids: set[int]) -> dict[tuple[int, str], int]:
     if not producto_ids:
         return {}
     filas = db.execute(

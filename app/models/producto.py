@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from app.models.stock_producto import StockProducto
     from app.models.stock_talle_producto import StockTalleProducto
     from app.models.subcategoria import Subcategoria
+    from app.models.variacion_producto import VariacionProducto
 
 
 class Producto(Base):
@@ -41,6 +43,16 @@ class Producto(Base):
         unique=True,
         index=True,
     )
+
+    wordpress_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+
+    origen: Mapped[str] = mapped_column(String(20), nullable=False, default="dux", server_default="dux", index=True)
+
+    conciliacion_estado: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pendiente", server_default="pendiente", index=True,
+    )
+    conciliacion_criterio: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    conciliado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     nombre: Mapped[str] = mapped_column(
         String(200),
@@ -177,4 +189,8 @@ class Producto(Base):
     ] = relationship(
         back_populates="producto",
         cascade="all, delete-orphan",
+    )
+
+    variaciones: Mapped[list["VariacionProducto"]] = relationship(
+        back_populates="producto", cascade="all, delete-orphan", order_by="VariacionProducto.id"
     )

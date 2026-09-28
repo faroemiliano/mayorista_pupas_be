@@ -1,12 +1,17 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CarritoItemRequest(BaseModel):
     producto_id: int = Field(gt=0)
-    talle: int = Field(default=1, ge=1, le=5)
+    talle: str = Field(default="1", min_length=1, max_length=30)
     cantidad: int = Field(gt=0)
+
+    @field_validator("talle", mode="before")
+    @classmethod
+    def normalizar_talle(cls, valor):
+        return str(valor).strip()
 
 
 class CarritoCalcularRequest(BaseModel):
@@ -22,7 +27,7 @@ class CarritoItemResponse(BaseModel):
     slug: str
     imagen_url: str | None
     cantidad: int
-    talle: int
+    talle: str
     precio_mayorista: Decimal
     precio_unitario: Decimal
     subtotal_sin_descuento: Decimal

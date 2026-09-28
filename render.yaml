@@ -33,9 +33,19 @@ services:
         sync: false
       - key: WOOCOMMERCE_CONSUMER_SECRET
         sync: false
+      - key: FRONTEND_URL
+        value: https://mayorista-pupas-fe.vercel.app
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: WORDPRESS_MIGRATION_SECRET
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: DUX_ESCRITURA_HABILITADA
+        value: "false"
+      - key: DUX_SINCRONIZACION_HABILITADA
         value: "false"
       - key: SMTP_HABILITADO
         value: "false"

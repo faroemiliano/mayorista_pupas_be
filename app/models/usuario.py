@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -15,6 +15,8 @@ class Usuario(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    wordpress_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
+    origen: Mapped[str] = mapped_column(String(20), nullable=False, default="web", server_default="web", index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     nombre: Mapped[str] = mapped_column(String(200), nullable=False)
     apellido: Mapped[str] = mapped_column(String(200), nullable=False, default="", server_default="")
@@ -26,6 +28,9 @@ class Usuario(Base):
     canal_venta: Mapped[str | None] = mapped_column(String(30), nullable=True)
     tienda_online_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    reset_password_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    reset_password_expira_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    requiere_migracion_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     email_verificado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     acepta_promociones_email: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

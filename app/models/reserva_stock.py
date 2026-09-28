@@ -26,7 +26,7 @@ class ReservaStock(Base):
         ForeignKey("productos.id", ondelete="CASCADE"), nullable=False, index=True
     )
     cantidad: Mapped[int] = mapped_column(Integer, nullable=False)
-    talle: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    talle: Mapped[str | None] = mapped_column(String(30), nullable=True)
     estado: Mapped[str] = mapped_column(
         String(30), nullable=False, default="activa", server_default="activa", index=True
     )
