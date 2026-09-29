@@ -79,7 +79,7 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
             # Toda cuenta proveniente de WordPress debe completar el cambio de
             # contraseña en el nuevo sitio. Esto también cubre cuentas que
             # fueron importadas previamente con una contraseña temporal.
-            if usuario.google_sub is None:
+            if usuario.google_sub is None and usuario.rol != "admin":
                 usuario.requiere_migracion_password = True
 
         usuario.telefono = usuario.telefono or _texto(facturacion.get("phone"))

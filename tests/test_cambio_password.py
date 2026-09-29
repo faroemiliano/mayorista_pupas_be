@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+import hashlib
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -63,5 +66,53 @@ def test_usuario_cambia_su_password(engine):
                 json={"email": "cliente@test.local", "password": "password-nueva"},
             )
             assert login_nuevo.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_cuenta_migrada_crea_password_desde_email_y_puede_ingresar(engine):
+    token_reset = "token-seguro-de-prueba-con-longitud-valida-123456"
+    with Session(engine) as db:
+        usuario = Usuario(
+            email="migrada@test.local",
+            nombre="Cuenta migrada",
+            password_hash=None,
+            rol="cliente",
+            activo=True,
+            estado_registro="aprobado",
+            origen="wordpress",
+            wordpress_id=123,
+            requiere_migracion_password=True,
+            reset_password_token_hash=hashlib.sha256(token_reset.encode()).hexdigest(),
+            reset_password_expira_en=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(usuario)
+        db.commit()
+
+    def override_get_db():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/auth/restablecer-password", json={
+                "token": token_reset,
+                "password": "password-nueva",
+                "confirmar_password": "password-nueva",
+            })
+            assert response.status_code == 200
+
+            login = client.post("/api/auth/login", json={
+                "email": "migrada@test.local",
+                "password": "password-nueva",
+            })
+            assert login.status_code == 200
+
+        with Session(engine) as db:
+            usuario = db.query(Usuario).filter_by(email="migrada@test.local").one()
+            assert usuario.requiere_migracion_password is False
+            assert usuario.email_verificado is True
+            assert usuario.reset_password_token_hash is None
     finally:
         app.dependency_overrides.clear()
