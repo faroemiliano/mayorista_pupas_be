@@ -30,11 +30,13 @@ def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depen
         usuario.reset_password_token_hash=hashlib.sha256(token.encode()).hexdigest()
         usuario.reset_password_expira_en=datetime.now(timezone.utc)+timedelta(hours=1)
         db.commit()
-        if settings.RESEND_API_KEY:
-            enlace=f"{settings.FRONTEND_URL.rstrip('/')}/restablecer-clave?token={token}"
-            try:
-                httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":f"Para crear tu nueva contraseña ingresá aquí: {enlace}\n\nEl enlace vence en una hora y se puede usar una sola vez."},timeout=15).raise_for_status()
-            except httpx.HTTPError: pass
+        if not settings.RESEND_API_KEY:
+            raise HTTPException(status_code=503, detail="El envío de emails no está configurado.")
+        enlace=f"{settings.FRONTEND_URL.rstrip('/')}/restablecer-clave?token={token}"
+        try:
+            httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":f"Para crear tu nueva contraseña ingresá aquí: {enlace}\n\nEl enlace vence en una hora y se puede usar una sola vez."},timeout=15).raise_for_status()
+        except httpx.HTTPError as error:
+            raise HTTPException(status_code=502, detail="Resend rechazó el envío del email. Verificá EMAIL_FROM y el dominio en Resend.") from error
     return RESET_RESPONSE
 
 @router.post("/restablecer-password")
