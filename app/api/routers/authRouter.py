@@ -17,6 +17,13 @@ from app.services.notificacion_service import notificar
 router=APIRouter(prefix="/api/auth",tags=["Autenticación"])
 RESET_RESPONSE={"mensaje":"Si el email corresponde a una cuenta, recibirás un enlace para cambiar la contraseña."}
 
+def _es_cuenta_wordpress(usuario: Usuario | None) -> bool:
+    return bool(usuario and usuario.activo and (
+        usuario.requiere_migracion_password
+        or usuario.wordpress_id is not None
+        or usuario.origen in {"wordpress", "web+wordpress"}
+    ))
+
 @router.post("/solicitar-reset-password")
 def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depends(get_db)):
     usuario=get_usuario_by_email(db,data.email.strip().lower())
@@ -66,7 +73,7 @@ def registrar(data:RegistroRequest,db:Session=Depends(get_db)):
 @router.post("/login",response_model=AuthResponse)
 def login(data:LoginRequest,db:Session=Depends(get_db)):
     usuario=get_usuario_by_email(db,data.email.strip().lower())
-    if usuario is not None and usuario.requiere_migracion_password:
+    if _es_cuenta_wordpress(usuario):
         raise HTTPException(status_code=409,detail="MIGRACION_PASSWORD_REQUERIDA")
     if usuario is None or usuario.password_hash is None or not verificar_password(data.password,usuario.password_hash):raise HTTPException(status_code=401,detail="Email o contraseña incorrectos.")
     if not usuario.activo:raise HTTPException(status_code=403,detail="La cuenta está deshabilitada.")
@@ -97,12 +104,12 @@ def login(data:LoginRequest,db:Session=Depends(get_db)):
 @router.post("/estado-email", response_model=EstadoEmailResponse)
 def estado_email(data: SolicitarResetPasswordRequest, db: Session = Depends(get_db)):
     usuario = get_usuario_by_email(db, data.email.strip().lower())
-    return {"requiere_migracion": bool(usuario and usuario.activo and usuario.requiere_migracion_password)}
+    return {"requiere_migracion": _es_cuenta_wordpress(usuario)}
 
 @router.post("/completar-migracion-password",response_model=AuthResponse)
 def completar_migracion_password(data:CompletarMigracionPasswordRequest,db:Session=Depends(get_db)):
     usuario=get_usuario_by_email(db,data.email.strip().lower())
-    if usuario is None or not usuario.requiere_migracion_password:
+    if not _es_cuenta_wordpress(usuario):
         raise HTTPException(status_code=400,detail="La cuenta no requiere migración.")
     if not settings.WORDPRESS_MIGRATION_SECRET:
         raise HTTPException(status_code=503,detail="La validación de cuentas migradas no está configurada.")
