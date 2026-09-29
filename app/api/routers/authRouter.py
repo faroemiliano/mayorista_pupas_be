@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.core.security import crear_token,hashear_password,require_cliente,verificar_password
 from app.database.session import get_db
 from app.models.usuario import Usuario
-from app.models.usuario_wordpress import UsuarioWordpress
 from app.models.notificacion import Notificacion
 from app.repositories.usuario_repository import get_usuario_by_email
 from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,CambiarPasswordRequest,CompletarMigracionPasswordRequest,EstadoEmailResponse,LoginRequest,RegistroRequest,RegistroResponse,RestablecerPasswordRequest,SolicitarResetPasswordRequest,UsuarioResponse
@@ -19,8 +18,7 @@ router=APIRouter(prefix="/api/auth",tags=["Autenticación"])
 RESET_RESPONSE={"mensaje":"Si el email corresponde a una cuenta, recibirás un enlace para cambiar la contraseña."}
 
 def _es_cuenta_wordpress(usuario: Usuario | None, db: Session | None = None) -> bool:
-    vinculada = bool(db and usuario and db.scalar(select(UsuarioWordpress.id).where(UsuarioWordpress.usuario_id == usuario.id)))
-    return bool(usuario and usuario.activo and (usuario.requiere_migracion_password or usuario.wordpress_id is not None or usuario.origen in {"wordpress", "web+wordpress"} or vinculada))
+    return bool(usuario and usuario.activo and usuario.requiere_migracion_password)
 
 @router.post("/solicitar-reset-password")
 def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depends(get_db)):
@@ -46,6 +44,7 @@ def restablecer_password(data:RestablecerPasswordRequest,db:Session=Depends(get_
     if usuario is None or expira is None or expira.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc):
         raise HTTPException(status_code=400,detail="El enlace es inválido o venció.")
     usuario.password_hash=hashear_password(data.password)
+    usuario.requiere_migracion_password=False
     usuario.requiere_migracion_password=False
     usuario.email_verificado=True
     usuario.reset_password_token_hash=None;usuario.reset_password_expira_en=None
