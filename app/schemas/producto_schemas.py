@@ -114,6 +114,7 @@ class CodigoBarraProductoResponse(BaseModel):
 
 class ProductoBaseResponse(BaseModel):
     id: int
+    origen: str
 
     dux_codigo: str
     nombre: str

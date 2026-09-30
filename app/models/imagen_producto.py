@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    LargeBinary,
     DateTime,
     ForeignKey,
     Integer,
@@ -39,6 +40,9 @@ class ImagenProducto(Base):
         String(500),
         nullable=False,
     )
+
+    contenido: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     orden: Mapped[int] = mapped_column(
         Integer,

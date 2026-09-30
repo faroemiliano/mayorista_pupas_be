@@ -3,12 +3,14 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 
 import httpx
+from sqlalchemy import select
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.integrations.dux.client import DuxClient
 from app.models.producto import Producto
+from app.models.imagen_producto import ImagenProducto
 
 from app.repositories.producto_repository import (
     get_producto,
@@ -85,6 +87,12 @@ def get_producto_imagen_service(
     if imagen_url is None:
         return None
 
+    if imagen_url.startswith("db:"):
+        imagen = db.get(ImagenProducto, int(imagen_url.removeprefix("db:")))
+        if imagen is None or imagen.producto_id != producto_id or imagen.contenido is None:
+            return None
+        return imagen.contenido, imagen.media_type or "image/jpeg"
+
     return _obtener_imagen_catalogo(imagen_url)
 
 
@@ -93,16 +101,17 @@ def get_imagen_producto_service(
     producto_id: int,
     imagen_id: int,
 ) -> tuple[bytes, str] | None:
-    imagen_url = get_imagen_producto_url(
-        db=db,
-        producto_id=producto_id,
-        imagen_id=imagen_id,
-    )
-
-    if imagen_url is None:
+    imagen = db.scalar(select(ImagenProducto).join(Producto).where(
+        ImagenProducto.id == imagen_id,
+        ImagenProducto.producto_id == producto_id,
+        Producto.habilitado.is_(True),
+        Producto.visible_tienda.is_(True),
+    ))
+    if imagen is None:
         return None
-
-    return _obtener_imagen_catalogo(imagen_url)
+    if imagen.contenido is not None:
+        return imagen.contenido, imagen.media_type or "image/jpeg"
+    return _obtener_imagen_catalogo(imagen.url)
 
 
 # =========================================================
