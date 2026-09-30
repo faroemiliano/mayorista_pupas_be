@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.producto import Producto
+from app.models.pedido import Pedido
 from app.models.reserva_stock import ReservaStock
+from app.core.config import settings
 
 
 ESTADOS_QUE_DESCUENTAN = ("activa", "enviada_dux")
@@ -72,10 +74,19 @@ def marcar_reservas_enviadas_dux(db: Session, pedido_id: int) -> None:
 
 def reconciliar_reservas_enviadas(db: Session) -> int:
     from app.models.stock_talle_producto import StockTalleProducto
-    reservas = db.scalars(
-        select(ReservaStock).where(ReservaStock.estado == "enviada_dux")
-    ).all()
     ahora = datetime.now(timezone.utc)
+    limite = ahora - timedelta(
+        minutes=settings.DUX_RECONCILIACION_RESERVA_MINUTOS
+    )
+    reservas = db.scalars(
+        select(ReservaStock)
+        .join(Pedido, Pedido.id == ReservaStock.pedido_id)
+        .where(
+            ReservaStock.estado == "enviada_dux",
+            Pedido.sincronizado_dux_en.is_not(None),
+            Pedido.sincronizado_dux_en <= limite,
+        )
+    ).all()
     for reserva in reservas:
         if reserva.talle is not None:
             stock_talle = db.scalar(select(StockTalleProducto).where(

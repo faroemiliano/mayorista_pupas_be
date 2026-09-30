@@ -13,12 +13,20 @@ from app.repositories.usuario_repository import get_usuario_by_email
 from app.schemas.auth_schemas import ActualizarPerfilRequest,AuthResponse,CambiarPasswordRequest,CompletarMigracionPasswordRequest,EstadoEmailResponse,LoginRequest,RegistroRequest,RegistroResponse,RestablecerPasswordRequest,SolicitarResetPasswordRequest,UsuarioResponse
 from app.core.config import settings
 from app.services.notificacion_service import notificar
+from app.services.password_reset_email_service import construir_email_restablecimiento
 
 router=APIRouter(prefix="/api/auth",tags=["Autenticación"])
 RESET_RESPONSE={"mensaje":"Si el email corresponde a una cuenta, recibirás un enlace para cambiar la contraseña."}
 
 def _es_cuenta_wordpress(usuario: Usuario | None, db: Session | None = None) -> bool:
     return bool(usuario and usuario.activo and usuario.requiere_migracion_password)
+
+
+def _fecha_en_utc(fecha: datetime) -> datetime:
+    """Normaliza fechas de PostgreSQL sin perder el huso horario almacenado."""
+    if fecha.tzinfo is None:
+        return fecha.replace(tzinfo=timezone.utc)
+    return fecha.astimezone(timezone.utc)
 
 @router.post("/solicitar-reset-password")
 def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depends(get_db)):
@@ -31,8 +39,13 @@ def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depen
         if not settings.RESEND_API_KEY:
             raise HTTPException(status_code=503, detail="El envío de emails no está configurado.")
         enlace=f"{settings.FRONTEND_URL.rstrip('/')}/restablecer-clave?token={token}"
+        texto_email, html_email = construir_email_restablecimiento(
+            nombre=usuario.nombre,
+            enlace=enlace,
+            logo_url=f"{settings.FRONTEND_URL.rstrip('/')}/brand/logo-pupas.jpg",
+        )
         try:
-            httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":f"Para crear tu nueva contraseña ingresá aquí: {enlace}\n\nEl enlace vence en una hora y se puede usar una sola vez."},timeout=15).raise_for_status()
+            httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":texto_email,"html":html_email},timeout=15).raise_for_status()
         except httpx.HTTPError as error:
             raise HTTPException(status_code=502, detail="Resend rechazó el envío del email. Verificá EMAIL_FROM y el dominio en Resend.") from error
     return RESET_RESPONSE
@@ -41,10 +54,9 @@ def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depen
 def restablecer_password(data:RestablecerPasswordRequest,db:Session=Depends(get_db)):
     usuario=db.scalar(select(Usuario).where(Usuario.reset_password_token_hash==hashlib.sha256(data.token.encode()).hexdigest()))
     expira=usuario.reset_password_expira_en if usuario else None
-    if usuario is None or expira is None or expira.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc):
+    if usuario is None or expira is None or _fecha_en_utc(expira)<datetime.now(timezone.utc):
         raise HTTPException(status_code=400,detail="El enlace es inválido o venció.")
     usuario.password_hash=hashear_password(data.password)
-    usuario.requiere_migracion_password=False
     usuario.requiere_migracion_password=False
     usuario.email_verificado=True
     usuario.reset_password_token_hash=None;usuario.reset_password_expira_en=None

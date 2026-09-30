@@ -15,6 +15,7 @@ from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.subcategoria import Subcategoria
 from app.models.reserva_stock import ReservaStock
+from app.services.stock_fuente_service import filtro_stock_fuente_activa
 
 
 # =========================================================
@@ -311,6 +312,7 @@ def get_productos(
                 StockProducto.producto_id.label("producto_id"),
                 func.sum(StockProducto.stock_disponible).label("cantidad"),
             )
+            .where(filtro_stock_fuente_activa(StockProducto.dux_id_deposito))
             .group_by(StockProducto.producto_id)
             .subquery()
         )

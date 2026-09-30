@@ -113,7 +113,12 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
                 nombre=datos.get("name") or f"Producto {wordpress_id}", slug="temporal",
             )
             db.add(producto); db.flush()
-        producto.origen = "wordpress"
+        vinculado_dux = (
+            not creado
+            and producto.conciliacion_estado == "vinculado"
+            and not producto.dux_codigo.startswith("WP-")
+        )
+        producto.origen = "wordpress_dux" if vinculado_dux else "wordpress"
         producto.nombre = datos.get("name") or producto.nombre
         producto.slug = _slug_unico(db, Producto, datos.get("slug") or producto.nombre, wordpress_id, producto.id)
         producto.codigo_externo = (datos.get("sku") or "").strip() or None
@@ -135,9 +140,10 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
         # La conversión puede repetirse sobre el mismo catálogo. Primero se
         # eliminan y confirman las relaciones que tienen claves únicas; de lo
         # contrario algunos motores intentan insertar antes de borrar.
-        producto.precios.clear()
-        producto.stocks.clear()
-        producto.stocks_talles.clear()
+        if not vinculado_dux:
+            producto.precios.clear()
+            producto.stocks.clear()
+            producto.stocks_talles.clear()
         producto.variaciones.clear()
         producto.imagenes.clear()
         db.flush()
@@ -149,18 +155,20 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
             settings.DUX_LISTA_PRECIO_MAYORISTA_ID,
             settings.DUX_LISTA_PRECIO_24_ID,
         ))
-        producto.precios = [] if precio is None else [
-            PrecioProducto(dux_id_lista=id_lista, nombre_lista="WordPress temporal", precio=precio)
-            for id_lista in ids_listas
-        ]
+        if not vinculado_dux:
+            producto.precios = [] if precio is None else [
+                PrecioProducto(dux_id_lista=id_lista, nombre_lista="WordPress temporal", precio=precio)
+                for id_lista in ids_listas
+            ]
 
         stock_total = sum(int(item.get("stock_quantity") or 0) for item in variaciones)
         if not variaciones:
             stock_total = int(datos.get("stock_quantity") or 0)
-        producto.stocks = [StockProducto(
-            dux_id_deposito=-1, nombre_deposito="WordPress temporal", stock_real=stock_total,
-            stock_reservado=0, stock_disponible=stock_total,
-        )]
+        if not vinculado_dux:
+            producto.stocks = [StockProducto(
+                dux_id_deposito=-1, nombre_deposito="WordPress temporal", stock_real=stock_total,
+                stock_reservado=0, stock_disponible=stock_total,
+            )]
 
         stock_por_talle: dict[str, int] = {}
         producto.variaciones = []
@@ -175,10 +183,11 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
                 stock=int(variacion.get("stock_quantity") or 0), estado_stock=variacion.get("stock_status"),
                 habilitada=variacion.get("status", "publish") == "publish",
             ))
-        producto.stocks_talles = [
-            StockTalleProducto(talle=talle, cantidad=cantidad, origen="wordpress")
-            for talle, cantidad in sorted(stock_por_talle.items())
-        ]
+        if not vinculado_dux:
+            producto.stocks_talles = [
+                StockTalleProducto(talle=talle, cantidad=cantidad, origen="wordpress")
+                for talle, cantidad in sorted(stock_por_talle.items())
+            ]
 
         imagenes = datos.get("images") or []
         producto.imagen_url = imagenes[0].get("src") if imagenes else None

@@ -14,6 +14,7 @@ from app.services.sincronizacion_catalogo_background_service import (
     obtener_estado_catalogo,
     preparar_sincronizacion_catalogo,
 )
+from app.services.stock_fuente_service import sumar_stock_fuente_activa
 
 
 router = APIRouter(prefix="/api/admin/productos", tags=["Administración - Productos"], dependencies=[Depends(require_admin)])
@@ -46,7 +47,7 @@ def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Qu
         query=query.where(filtro);count=count.where(filtro)
     total=db.scalar(count) or 0
     productos=db.scalars(query.order_by(Producto.nombre,Producto.id).offset((page-1)*limit).limit(limit)).all()
-    return {"items":[{"id":p.id,"codigo":p.dux_codigo,"nombre":p.nombre,"stock_dux":int(sum(s.stock_disponible for s in p.stocks)),"origen":next((s.origen for s in p.stocks_talles),"sin_configurar"),"talles":{s.talle:s.cantidad for s in p.stocks_talles}} for p in productos],"total":total,"page":page,"limit":limit,"total_paginas":((total+limit-1)//limit if total else 0)}
+    return {"items":[{"id":p.id,"codigo":p.dux_codigo,"nombre":p.nombre,"stock_dux":int(sumar_stock_fuente_activa(p.stocks)),"origen":next((s.origen for s in p.stocks_talles),"sin_configurar"),"talles":{s.talle:s.cantidad for s in p.stocks_talles}} for p in productos],"total":total,"page":page,"limit":limit,"total_paginas":((total+limit-1)//limit if total else 0)}
 
 @router.post("/{producto_id}/stock-talles")
 def guardar_stock_talles(producto_id:int,data:StockTallesRequest,db:Session=Depends(get_db)):
@@ -57,10 +58,14 @@ def guardar_stock_talles(producto_id:int,data:StockTallesRequest,db:Session=Depe
     if any(not talle for talle in talles_limpios) or len(set(talles_limpios))!=len(talles_limpios):raise HTTPException(422,"Los talles deben ser únicos y no pueden estar vacíos.")
     producto=db.scalar(select(Producto).options(selectinload(Producto.stocks),selectinload(Producto.stocks_talles)).where(Producto.id==producto_id).with_for_update())
     if producto is None:raise HTTPException(404,"Producto no encontrado.")
-    stock_dux=int(sum(s.stock_disponible for s in producto.stocks))
+    stock_dux=int(sumar_stock_fuente_activa(producto.stocks))
     if sum(item.cantidad for item in data.talles)>stock_dux:raise HTTPException(422,f"La suma por talles no puede superar el stock Dux ({stock_dux}).")
     reservadas=cantidades_reservadas_por_talle(db,{producto_id})
     existentes={item.talle:item for item in producto.stocks_talles}
+    omitidos=set(existentes)-set(talles_limpios)
+    for talle in omitidos:
+        if reservadas.get((producto_id,talle),0)>0:raise HTTPException(422,f"El talle {talle} tiene unidades reservadas y no puede eliminarse.")
+        db.delete(existentes[talle])
     for item,talle in zip(data.talles,talles_limpios):
         if item.cantidad<reservadas.get((producto_id,talle),0):raise HTTPException(422,f"El talle {talle} tiene unidades reservadas y no puede reducirse a esa cantidad.")
         fila=existentes.get(talle) or StockTalleProducto(producto_id=producto_id,talle=talle)

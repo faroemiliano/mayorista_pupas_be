@@ -9,6 +9,7 @@ from app.repositories.carrito_repository import (
     get_productos_carrito,
 )
 from app.repositories.reserva_stock_repository import cantidades_reservadas, cantidades_reservadas_por_talle
+from app.services.stock_fuente_service import sumar_stock_fuente_activa
 from app.schemas.carrito_schemas import (
     CarritoCalcularRequest,
 )
@@ -124,13 +125,7 @@ def calcular_carrito_service(
             raise CarritoError(f"El producto {producto.id}, talle {talle}, tiene {disponible_talle} unidades disponibles.")
 
         stock_dux = max(
-            sum(
-                (
-                    Decimal(stock.stock_disponible)
-                    for stock in producto.stocks
-                ),
-                start=Decimal("0.00"),
-            ),
+            sumar_stock_fuente_activa(producto.stocks),
             Decimal("0.00"),
         )
         stock_disponible = max(

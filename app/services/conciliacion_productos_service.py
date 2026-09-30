@@ -3,12 +3,18 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from slugify import slugify
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.integrations.dux.client import DuxClient
+from app.models.codigo_barra_producto import CodigoBarraProducto
 from app.models.migracion_woocommerce import MigracionWooCommerce
+from app.models.pedido_historico_wordpress import PedidoItemHistoricoWordpress
+from app.models.pedido_item import PedidoItem
+from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
+from app.models.reserva_stock import ReservaStock
+from app.models.stock_producto import StockProducto
 from app.services.dux_sync_service import _obtener_pagina_items_dux
 from app.services.migracion_woocommerce_service import _guardar
 
@@ -196,6 +202,157 @@ def generar_conciliacion(db: Session, progreso=None) -> dict:
     return resultado
 
 
+class _ConflictoVinculacionProducto(ValueError):
+    def __init__(self, mensaje: str, producto_id: int):
+        super().__init__(mensaje)
+        self.producto_id = producto_id
+
+
+def _fusionar_reservas_producto(
+    db: Session,
+    producto_wordpress: Producto,
+    producto_dux: Producto,
+) -> None:
+    reservas_dux = list(db.scalars(
+        select(ReservaStock)
+        .where(ReservaStock.producto_id == producto_dux.id)
+        .with_for_update()
+    ).all())
+
+    # Una misma reserva no puede representar simultáneamente estados distintos.
+    # Validamos todo antes de cambiar filas para que el merge sea atómico.
+    coincidencias: dict[int, ReservaStock | None] = {}
+    for reserva in reservas_dux:
+        filtro_talle = (
+            ReservaStock.talle.is_(None)
+            if reserva.talle is None
+            else ReservaStock.talle == reserva.talle
+        )
+        existente = db.scalar(
+            select(ReservaStock)
+            .where(
+                ReservaStock.producto_id == producto_wordpress.id,
+                ReservaStock.pedido_id == reserva.pedido_id,
+                filtro_talle,
+            )
+            .with_for_update()
+        )
+        if existente is not None and existente.estado != reserva.estado:
+            raise ValueError(
+                "No se pueden fusionar los productos porque un pedido tiene "
+                "reservas del mismo talle con estados diferentes."
+            )
+        coincidencias[reserva.id] = existente
+
+    for reserva in reservas_dux:
+        existente = coincidencias[reserva.id]
+        if existente is None:
+            reserva.producto_id = producto_wordpress.id
+            continue
+        existente.cantidad += reserva.cantidad
+        db.delete(reserva)
+
+
+def _fusionar_producto_dux(
+    db: Session,
+    producto_wordpress: Producto,
+    producto_dux: Producto,
+) -> None:
+    """Absorbe un registro Dux duplicado conservando el producto WordPress."""
+    precios = [
+        {
+            "dux_id_lista": item.dux_id_lista,
+            "nombre_lista": item.nombre_lista,
+            "precio": item.precio,
+        }
+        for item in producto_dux.precios
+    ]
+    stocks = [
+        {
+            "dux_id_deposito": item.dux_id_deposito,
+            "nombre_deposito": item.nombre_deposito,
+            "stock_real": item.stock_real,
+            "stock_reservado": item.stock_reservado,
+            "stock_disponible": item.stock_disponible,
+            "dux_id_det_item": item.dux_id_det_item,
+            "codigo_barra_detalle": item.codigo_barra_detalle,
+            "talle": item.talle,
+            "color": item.color,
+        }
+        for item in producto_dux.stocks
+    ]
+    codigos_barra = [item.codigo for item in producto_dux.codigos_barra]
+    _fusionar_reservas_producto(db, producto_wordpress, producto_dux)
+
+    # Stock, precios y códigos son datos operativos de Dux. La presentación
+    # WordPress (nombre, slug, descripción, imágenes y variantes) permanece.
+    producto_wordpress.precios.clear()
+    producto_wordpress.stocks.clear()
+    producto_wordpress.codigos_barra.clear()
+    db.flush()
+
+    producto_wordpress.precios.extend(PrecioProducto(**item) for item in precios)
+    producto_wordpress.stocks.extend(StockProducto(**item) for item in stocks)
+    producto_wordpress.codigos_barra.extend(
+        CodigoBarraProducto(codigo=codigo) for codigo in codigos_barra
+    )
+    # Estas referencias no forman parte de relaciones cascade de Producto;
+    # deben apuntar al ID canónico antes de eliminar el duplicado.
+    db.execute(
+        update(PedidoItem)
+        .where(PedidoItem.producto_id == producto_dux.id)
+        .values(producto_id=producto_wordpress.id)
+    )
+    db.execute(
+        update(PedidoItemHistoricoWordpress)
+        .where(PedidoItemHistoricoWordpress.producto_id == producto_dux.id)
+        .values(producto_id=producto_wordpress.id)
+    )
+    db.flush()
+
+    db.delete(producto_dux)
+    db.flush()
+
+
+def _vincular_producto_dux(
+    db: Session,
+    producto: Producto,
+    dux_codigo: str,
+    criterio: str,
+) -> str:
+    codigo = dux_codigo.strip()
+    if producto.conciliacion_estado == "vinculado":
+        if producto.dux_codigo == codigo:
+            return "ya_vinculado"
+        raise _ConflictoVinculacionProducto(
+            "El producto WordPress ya está vinculado con otro código Dux.",
+            producto.id,
+        )
+
+    existente = db.scalar(
+        select(Producto)
+        .where(Producto.dux_codigo == codigo, Producto.id != producto.id)
+        .with_for_update()
+    )
+    estado = "vinculado"
+    if existente is not None:
+        if existente.wordpress_id is not None or existente.origen != "dux":
+            raise _ConflictoVinculacionProducto(
+                "Ese código Dux ya está relacionado con otro producto WordPress.",
+                existente.id,
+            )
+        _fusionar_producto_dux(db, producto, existente)
+        estado = "fusionado"
+
+    producto.dux_codigo = codigo
+    producto.origen = "wordpress_dux"
+    producto.conciliacion_estado = "vinculado"
+    producto.conciliacion_criterio = criterio
+    producto.conciliado_en = datetime.now(timezone.utc)
+    db.flush()
+    return estado
+
+
 def aplicar_coincidencias_seguras(db: Session) -> dict:
     fila = db.scalar(select(MigracionWooCommerce).where(
         MigracionWooCommerce.tipo == "conciliacion",
@@ -204,33 +361,47 @@ def aplicar_coincidencias_seguras(db: Session) -> dict:
     if fila is None:
         raise ValueError("Primero debe generarse el informe de conciliación.")
 
-    resultado = {"vinculados": 0, "ya_vinculados": 0, "omitidos": 0, "conflictos": []}
-    for coincidencia in fila.datos.get("coincidencias") or []:
-        wordpress_id = int(coincidencia["wordpress_id"])
-        codigo_dux = str(coincidencia["dux_codigo"]).strip()
-        producto = db.scalar(select(Producto).where(Producto.wordpress_id == wordpress_id))
-        if producto is None or not codigo_dux:
-            resultado["omitidos"] += 1
-            continue
-        conflicto = db.scalar(select(Producto).where(
-            Producto.dux_codigo == codigo_dux,
-            Producto.id != producto.id,
-        ))
-        if conflicto is not None:
-            resultado["conflictos"].append({
-                "wordpress_id": wordpress_id, "dux_codigo": codigo_dux,
-                "producto_local_id": conflicto.id,
-            })
-            continue
-        if producto.conciliacion_estado == "vinculado" and producto.dux_codigo == codigo_dux:
-            resultado["ya_vinculados"] += 1
-            continue
-        producto.dux_codigo = codigo_dux
-        producto.origen = "wordpress_dux"
-        producto.conciliacion_estado = "vinculado"
-        producto.conciliacion_criterio = coincidencia.get("criterio")
-        producto.conciliado_en = datetime.now(timezone.utc)
-        resultado["vinculados"] += 1
+    resultado = {
+        "vinculados": 0,
+        "fusionados": 0,
+        "ya_vinculados": 0,
+        "omitidos": 0,
+        "conflictos": [],
+    }
+    try:
+        for coincidencia in fila.datos.get("coincidencias") or []:
+            wordpress_id = int(coincidencia["wordpress_id"])
+            codigo_dux = str(coincidencia["dux_codigo"]).strip()
+            producto = db.scalar(
+                select(Producto)
+                .where(Producto.wordpress_id == wordpress_id)
+                .with_for_update()
+            )
+            if producto is None or not codigo_dux:
+                resultado["omitidos"] += 1
+                continue
+            try:
+                estado = _vincular_producto_dux(
+                    db,
+                    producto,
+                    codigo_dux,
+                    coincidencia.get("criterio") or "automatico",
+                )
+            except _ConflictoVinculacionProducto as error:
+                resultado["conflictos"].append({
+                    "wordpress_id": wordpress_id,
+                    "dux_codigo": codigo_dux,
+                    "producto_local_id": error.producto_id,
+                })
+                continue
+            if estado == "ya_vinculado":
+                resultado["ya_vinculados"] += 1
+            else:
+                resultado["vinculados"] += 1
+                resultado["fusionados"] += int(estado == "fusionado")
+    except Exception:
+        db.rollback()
+        raise
 
     if resultado["conflictos"]:
         db.rollback()
@@ -251,23 +422,39 @@ def vincular_coincidencia_manual(db: Session, wordpress_id: int, dux_codigo: str
     ))
     if fila is None:
         raise ValueError("No existe un informe de conciliación.")
-    sugerencia = next((item for item in fila.datos.get("dudosos") or []
-                       if int(item["wordpress_id"]) == wordpress_id), None)
-    if sugerencia is None or str(sugerencia.get("dux_codigo_sugerido") or "").strip() != dux_codigo.strip():
-        raise ValueError("La relación propuesta no pertenece al informe pendiente.")
-    producto = db.scalar(select(Producto).where(Producto.wordpress_id == wordpress_id))
+    datos = fila.datos
+    wordpress_informados = {
+        int(item["wordpress_id"])
+        for seccion in ("coincidencias", "dudosos", "solo_wordpress")
+        for item in datos.get(seccion) or []
+        if item.get("wordpress_id") is not None
+    }
+    codigos_dux_informados = {
+        str(item.get(clave) or "").strip()
+        for seccion, clave in (
+            ("coincidencias", "dux_codigo"),
+            ("dudosos", "dux_codigo_sugerido"),
+            ("solo_dux", "dux_codigo"),
+        )
+        for item in datos.get(seccion) or []
+        if str(item.get(clave) or "").strip()
+    }
+    if wordpress_id not in wordpress_informados:
+        raise ValueError("El producto WordPress no pertenece al informe pendiente.")
+    if dux_codigo.strip() not in codigos_dux_informados:
+        raise ValueError("El código Dux no pertenece al informe pendiente.")
+    producto = db.scalar(
+        select(Producto)
+        .where(Producto.wordpress_id == wordpress_id)
+        .with_for_update()
+    )
     if producto is None:
         raise ValueError("El producto de WordPress no existe en el catálogo local.")
-    conflicto = db.scalar(select(Producto).where(
-        Producto.dux_codigo == dux_codigo.strip(), Producto.id != producto.id,
-    ))
-    if conflicto is not None:
-        raise ValueError("Ese producto de Dux ya está relacionado con otro producto de WordPress.")
-    producto.dux_codigo = dux_codigo.strip()
-    producto.origen = "wordpress_dux"
-    producto.conciliacion_estado = "vinculado"
-    producto.conciliacion_criterio = "manual"
-    producto.conciliado_en = datetime.now(timezone.utc)
+    try:
+        _vincular_producto_dux(db, producto, dux_codigo, "manual")
+    except Exception:
+        db.rollback()
+        raise
     db.commit()
     db.refresh(producto)
     return producto

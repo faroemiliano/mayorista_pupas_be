@@ -8,6 +8,7 @@ from app.models.pedido_item import PedidoItem
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
+from app.services.stock_fuente_service import filtro_stock_fuente_activa
 
 
 def get_analitica_productos(
@@ -59,6 +60,7 @@ def get_analitica_productos(
             StockProducto.producto_id,
             func.coalesce(func.sum(StockProducto.stock_disponible), 0).label("stock_disponible"),
         )
+        .where(filtro_stock_fuente_activa(StockProducto.dux_id_deposito))
         .group_by(StockProducto.producto_id)
         .subquery()
     )

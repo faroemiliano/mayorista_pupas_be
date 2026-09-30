@@ -45,8 +45,14 @@ services:
         sync: false
       - key: DUX_ESCRITURA_HABILITADA
         value: "false"
+      - key: DUX_ENVIO_AUTOMATICO_PEDIDOS_HABILITADO
+        value: "false"
+      - key: DUX_ID_PERSONAL_PEDIDOS_WEB
+        sync: false
       - key: DUX_SINCRONIZACION_HABILITADA
         value: "false"
+      - key: DUX_RECONCILIACION_RESERVA_MINUTOS
+        value: "10"
       - key: SMTP_HABILITADO
         value: "false"
       - key: DUX_PERSONALES_PEDIDOS

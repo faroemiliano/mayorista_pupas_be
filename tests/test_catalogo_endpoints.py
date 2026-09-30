@@ -8,6 +8,7 @@ from app.models.imagen_producto import ImagenProducto
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
+from app.models.stock_talle_producto import StockTalleProducto
 from app.models.subcategoria import Subcategoria
 
 
@@ -226,6 +227,73 @@ def test_filtrar_productos_del_catalogo(
     assert resultado["items"][0]["tiene_stock"] is True
     assert "precios" not in resultado["items"][0]
     assert "costo" not in resultado["items"][0]
+
+
+def test_catalogo_usa_solo_deposito_dux_al_activar_fuente_maestra(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+):
+    from app.core.config import settings
+
+    ids = crear_catalogo(db)
+    producto = db.get(Producto, ids["producto_id"])
+    producto.stocks[0].dux_id_deposito = -1
+    producto.stocks[0].nombre_deposito = "WordPress temporal"
+    producto.stocks.append(StockProducto(
+        dux_id_deposito=2169,
+        nombre_deposito="Depósito web",
+        stock_real=3,
+        stock_reservado=0,
+        stock_disponible=3,
+    ))
+    producto.stocks.append(StockProducto(
+        dux_id_deposito=9999,
+        nombre_deposito="Otra sucursal",
+        stock_real=40,
+        stock_reservado=0,
+        stock_disponible=40,
+    ))
+    db.commit()
+    monkeypatch.setattr(settings, "DUX_SINCRONIZACION_HABILITADA", True)
+    monkeypatch.setattr(settings, "DUX_ID_DEPOSITO", 2169)
+
+    response = client.get("/api/productos/", params={"con_stock": True})
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["stock_disponible"] == "3.00"
+
+
+def test_catalogo_no_ofrece_stock_temporal_wordpress_en_modo_dux(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+):
+    from app.core.config import settings
+
+    ids = crear_catalogo(db)
+    producto = db.get(Producto, ids["producto_id"])
+    producto.origen = "wordpress"
+    producto.dux_codigo = f"WP-{producto.wordpress_id or producto.id}"
+    producto.stocks[0].dux_id_deposito = -1
+    producto.stocks[0].nombre_deposito = "WordPress temporal"
+    producto.stocks_talles.append(StockTalleProducto(
+        talle="M",
+        cantidad=4,
+        origen="wordpress",
+    ))
+    db.commit()
+    monkeypatch.setattr(settings, "DUX_SINCRONIZACION_HABILITADA", True)
+    monkeypatch.setattr(settings, "DUX_ID_DEPOSITO", 2169)
+
+    con_stock = client.get("/api/productos/", params={"con_stock": True}).json()
+    detalle = client.get(f"/api/productos/{producto.id}").json()
+
+    assert con_stock["total"] == 0
+    assert detalle["stock_disponible"] == "0.00"
+    assert detalle["tiene_stock"] is False
+    assert detalle["talles"][0]["disponible"] == 0
 
 
 def test_obtener_recursos_por_slug_y_responder_404(

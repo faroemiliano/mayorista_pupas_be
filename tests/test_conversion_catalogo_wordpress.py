@@ -2,6 +2,9 @@ from sqlalchemy import select
 
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
+from app.models.precio_producto import PrecioProducto
+from app.models.stock_producto import StockProducto
+from app.models.stock_talle_producto import StockTalleProducto
 from app.services.conversion_catalogo_wordpress_service import convertir_catalogo_wordpress
 
 
@@ -40,3 +43,72 @@ def test_convierte_producto_wordpress_sin_perder_variaciones(db):
     assert len(producto.precios) == 2
     assert len(producto.variaciones) == 2
     assert len(producto.imagenes) == 2
+
+
+def test_reconversion_wordpress_no_pisa_stock_ni_precios_dux_vinculados(db):
+    datos = {
+        "id": 20,
+        "name": "Producto comercial",
+        "slug": "producto-comercial",
+        "status": "publish",
+        "type": "variable",
+        "price": "100",
+        "categories": [],
+        "images": [],
+        "_variaciones_completas": [{
+            "id": 201,
+            "sku": "DUX-20",
+            "price": "100",
+            "stock_quantity": 99,
+            "stock_status": "instock",
+            "status": "publish",
+            "attributes": [{"name": "Talle", "option": "M"}],
+        }],
+    }
+    db.add(MigracionWooCommerce(
+        tipo="producto",
+        id_externo="20",
+        checksum="d" * 64,
+        datos=datos,
+    ))
+    producto = Producto(
+        wordpress_id=20,
+        origen="wordpress_dux",
+        dux_codigo="DUX-20",
+        nombre="Producto comercial",
+        slug="producto-comercial",
+        conciliacion_estado="vinculado",
+    )
+    producto.precios.append(PrecioProducto(
+        dux_id_lista=4710,
+        nombre_lista="MAYORISTA DUX",
+        precio=250,
+    ))
+    producto.stocks.append(StockProducto(
+        dux_id_deposito=2169,
+        nombre_deposito="Depósito Dux",
+        stock_real=7,
+        stock_reservado=0,
+        stock_disponible=7,
+    ))
+    producto.stocks_talles.append(StockTalleProducto(
+        talle="M",
+        cantidad=7,
+        origen="dux",
+    ))
+    db.add(producto)
+    db.commit()
+
+    convertir_catalogo_wordpress(db)
+    db.refresh(producto)
+
+    assert producto.origen == "wordpress_dux"
+    assert [(precio.nombre_lista, int(precio.precio)) for precio in producto.precios] == [
+        ("MAYORISTA DUX", 250),
+    ]
+    assert [(stock.dux_id_deposito, int(stock.stock_disponible)) for stock in producto.stocks] == [
+        (2169, 7),
+    ]
+    assert [(stock.talle, stock.cantidad, stock.origen) for stock in producto.stocks_talles] == [
+        ("M", 7, "dux"),
+    ]

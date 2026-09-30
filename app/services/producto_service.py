@@ -18,6 +18,7 @@ from app.repositories.producto_repository import (
     get_productos,
 )
 from app.repositories.reserva_stock_repository import cantidades_reservadas, cantidades_reservadas_por_talle
+from app.services.stock_fuente_service import sumar_stock_fuente_activa
 
 
 def _orden_talle(talle: str) -> tuple[int, float, str]:
@@ -30,11 +31,15 @@ def _orden_talle(talle: str) -> tuple[int, float, str]:
 
 
 def _talles_catalogo(producto: Producto, reservas_talle: dict) -> list[dict]:
+    limite_total = max(int(getattr(producto, "stock_disponible", 0)), 0)
     return [
         {
             "talle": item.talle,
             "cantidad": item.cantidad,
-            "disponible": max(item.cantidad - reservas_talle.get((producto.id, item.talle), 0), 0),
+            "disponible": min(
+                max(item.cantidad - reservas_talle.get((producto.id, item.talle), 0), 0),
+                limite_total,
+            ),
         }
         for item in sorted(producto.stocks_talles, key=lambda item: _orden_talle(item.talle))
     ]
@@ -134,13 +139,7 @@ def aplicar_datos_catalogo(
         precio_24_productos if mostrar_precios else None
     )
 
-    stock_disponible = sum(
-        (
-            Decimal(stock.stock_disponible)
-            for stock in producto.stocks
-        ),
-        start=Decimal("0.00"),
-    )
+    stock_disponible = sumar_stock_fuente_activa(producto.stocks)
 
     producto.stock_disponible = max(
         stock_disponible - reserva_local,

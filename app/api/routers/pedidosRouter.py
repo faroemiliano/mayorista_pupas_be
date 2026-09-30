@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -15,7 +15,12 @@ from app.schemas.pedido_schemas import (
     PedidoResponse,
     EnviarDuxRequest,
 )
-from app.services.dux_pedido_service import DuxPedidoError, enviar_pedido_dux
+from app.services.dux_pedido_service import (
+    DuxPedidoError,
+    enviar_pedido_dux,
+    enviar_pedido_dux_en_segundo_plano,
+    envio_automatico_dux_habilitado,
+)
 from app.services.pedido_service import (
     PedidoError,
     actualizar_estado_pedido_service,
@@ -30,9 +35,17 @@ admin_router = APIRouter(prefix="/api/admin/pedidos", tags=["Administración - P
 
 
 @router.post("/", response_model=PedidoResponse, status_code=status.HTTP_201_CREATED)
-def crear_pedido(data: PedidoCreateRequest, db: Session = Depends(get_db), usuario: Usuario = Depends(require_cliente)):
+def crear_pedido(
+    data: PedidoCreateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_cliente),
+):
     try:
-        return crear_pedido_service(db, data, usuario)
+        pedido = crear_pedido_service(db, data, usuario)
+        if envio_automatico_dux_habilitado():
+            background_tasks.add_task(enviar_pedido_dux_en_segundo_plano, pedido.id)
+        return pedido
     except PedidoError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 

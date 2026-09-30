@@ -15,13 +15,21 @@ class Settings(BaseSettings):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
 
+    @field_validator("DUX_ID_PERSONAL_PEDIDOS_WEB", mode="before")
+    @classmethod
+    def empty_personal_is_none(cls, value: str | int | None) -> str | int | None:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
     DUX_API_TOKEN: str
     DUX_ID_EMPRESA: int | None = None
     DUX_ID_SUCURSAL: int | None = None
     DUX_ID_DEPOSITO: int | None = None
     DUX_PERSONALES_PEDIDOS: str = "1051689,796900"
     DUX_ESCRITURA_HABILITADA: bool = False
+    DUX_ENVIO_AUTOMATICO_PEDIDOS_HABILITADO: bool = False
+    DUX_ID_PERSONAL_PEDIDOS_WEB: int | None = None
     DUX_SINCRONIZACION_HABILITADA: bool = False
+    DUX_RECONCILIACION_RESERVA_MINUTOS: int = 10
     SMTP_HABILITADO: bool = False
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

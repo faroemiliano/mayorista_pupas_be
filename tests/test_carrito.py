@@ -275,6 +275,31 @@ def test_carrito_rechaza_cantidad_superior_al_stock(
     )
 
 
+def test_carrito_ignora_stock_wordpress_cuando_dux_es_fuente(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+):
+    from app.core.config import settings
+
+    producto = crear_producto(db, 50)
+    producto.origen = "wordpress"
+    producto.stocks[0].dux_id_deposito = -1
+    producto.stocks[0].nombre_deposito = "WordPress temporal"
+    db.commit()
+    monkeypatch.setattr(settings, "DUX_SINCRONIZACION_HABILITADA", True)
+    monkeypatch.setattr(settings, "DUX_ID_DEPOSITO", 2169)
+
+    response = client.post("/api/carrito/calcular", json={"items": [{
+        "producto_id": producto.id,
+        "talle": "1",
+        "cantidad": 1,
+    }]})
+
+    assert response.status_code == 400
+    assert "0.00 unidades disponibles" in response.json()["detail"]
+
+
 def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, db: Session):
     producto = crear_producto(db, 8)
     producto.stocks_talles[0].cantidad = 50

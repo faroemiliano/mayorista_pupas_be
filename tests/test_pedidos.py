@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -7,7 +7,9 @@ from sqlalchemy import select
 
 from tests.test_carrito import crear_producto
 from app.models.reserva_stock import ReservaStock
+from app.models.pedido import Pedido
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
+from app.repositories.reserva_stock_repository import reconciliar_reservas_enviadas
 
 
 def pedido_payload(producto_id: int, cantidad: int = 24) -> dict:
@@ -59,6 +61,26 @@ def test_crear_pedido_guarda_totales_e_items(
         f"/api/pedidos/{pedido['codigo']}"
     )
     assert consulta.status_code == 200
+
+
+def test_pedido_confirmado_programa_envio_automatico_a_dux(client: TestClient, db: Session, monkeypatch):
+    producto = crear_producto(db, 1, precio_mayorista=Decimal("6000.00"), precio_24=Decimal("5000.00"))
+    db.commit()
+    pedidos_enviados = []
+
+    monkeypatch.setattr(
+        "app.api.routers.pedidosRouter.envio_automatico_dux_habilitado",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.api.routers.pedidosRouter.enviar_pedido_dux_en_segundo_plano",
+        lambda pedido_id: pedidos_enviados.append(pedido_id),
+    )
+
+    response = client.post("/api/pedidos/", json=pedido_payload(producto.id))
+
+    assert response.status_code == 201
+    assert pedidos_enviados == [response.json()["id"]]
 
 
 def test_pedido_rechaza_compra_inferior_al_minimo(
@@ -267,8 +289,6 @@ def test_nuevo_pedido_genera_notificacion_para_admin(client: TestClient, db: Ses
 
 
 def test_admin_filtra_pedidos_por_mes_y_cliente(client: TestClient, db: Session):
-    from app.models.pedido import Pedido
-
     base = dict(
         usuario_id=None,
         estado="pendiente",
@@ -298,3 +318,61 @@ def test_admin_filtra_pedidos_por_mes_y_cliente(client: TestClient, db: Session)
     assert response.status_code == 200, response.text
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["codigo"] == "PUP-OCTUBRE-ANA"
+
+
+def test_reserva_enviada_espera_a_que_dux_impacte_el_pedido(db, monkeypatch):
+    from app.core.config import settings
+
+    producto = crear_producto(db, 70)
+    ahora = datetime.now(timezone.utc)
+    base = dict(
+        estado="pendiente",
+        cliente_nombre="Cliente",
+        cliente_telefono="3410000000",
+        provincia="Santa Fe",
+        localidad="Rosario",
+        direccion="Calle 123",
+        cantidad_productos_diferentes=1,
+        cantidad_unidades=3,
+        aplica_precio_24_productos=False,
+        subtotal_sin_descuento=Decimal("300"),
+        descuento_aplicado=Decimal("0"),
+        total=Decimal("300"),
+        estado_sync_dux="enviado",
+    )
+    antiguo = Pedido(
+        codigo="PUP-DUX-ANTIGUO",
+        sincronizado_dux_en=ahora - timedelta(minutes=11),
+        **base,
+    )
+    reciente = Pedido(
+        codigo="PUP-DUX-RECIENTE",
+        sincronizado_dux_en=ahora - timedelta(minutes=2),
+        **base,
+    )
+    antiguo.reservas_stock.append(ReservaStock(
+        producto_id=producto.id,
+        talle="1",
+        cantidad=3,
+        estado="enviada_dux",
+    ))
+    reciente.reservas_stock.append(ReservaStock(
+        producto_id=producto.id,
+        talle="1",
+        cantidad=2,
+        estado="enviada_dux",
+    ))
+    db.add_all([antiguo, reciente])
+    db.commit()
+    monkeypatch.setattr(settings, "DUX_RECONCILIACION_RESERVA_MINUTOS", 10)
+
+    reconciliadas = reconciliar_reservas_enviadas(db)
+    db.commit()
+    db.refresh(antiguo.reservas_stock[0])
+    db.refresh(reciente.reservas_stock[0])
+    db.refresh(producto.stocks_talles[0])
+
+    assert reconciliadas == 1
+    assert antiguo.reservas_stock[0].estado == "reconciliada"
+    assert reciente.reservas_stock[0].estado == "enviada_dux"
+    assert producto.stocks_talles[0].cantidad == 97

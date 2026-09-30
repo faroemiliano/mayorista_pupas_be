@@ -5,6 +5,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.database.session import SessionLocal
 from app.integrations.dux.client import DuxClient
 from app.models.pedido import Pedido
 from app.repositories.pedido_repository import get_pedido
@@ -12,6 +13,30 @@ from app.repositories.reserva_stock_repository import marcar_reservas_enviadas_d
 
 
 class DuxPedidoError(ValueError): pass
+
+
+def envio_automatico_dux_habilitado() -> bool:
+    """Indica si un pedido confirmado debe salir automáticamente hacia Dux."""
+    return bool(
+        settings.DUX_ESCRITURA_HABILITADA
+        and settings.DUX_ENVIO_AUTOMATICO_PEDIDOS_HABILITADO
+        and settings.DUX_ID_PERSONAL_PEDIDOS_WEB in settings.dux_personales_pedidos
+    )
+
+
+def enviar_pedido_dux_en_segundo_plano(pedido_id: int) -> None:
+    """Envía un pedido confirmado sin demorar la respuesta al cliente.
+
+    Si Dux falla, ``enviar_pedido_dux`` conserva el pedido y su reserva local
+    marcados con error para poder reintentar desde administración.
+    """
+    if not envio_automatico_dux_habilitado():
+        return
+    with SessionLocal() as db:
+        try:
+            enviar_pedido_dux(db, pedido_id, settings.DUX_ID_PERSONAL_PEDIDOS_WEB)
+        except DuxPedidoError:
+            return
 
 
 def _cliente_dux(db: Session, pedido: Pedido, dux: DuxClient) -> int:

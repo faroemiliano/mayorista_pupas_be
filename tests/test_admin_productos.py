@@ -160,3 +160,11 @@ def test_admin_distribuye_stock_dux_entre_talles(client, db):
         "talles": [{"talle": talle, "cantidad": 11} for talle in range(1, 6)]
     })
     assert exceso.status_code == 422
+
+    reemplazo = client.post(f"/api/admin/productos/{producto.id}/stock-talles", json={
+        "talles": [{"talle": "3", "cantidad": 5}]
+    })
+    assert reemplazo.status_code == 200, reemplazo.text
+    db.expire_all()
+    actualizado = db.get(Producto, producto.id)
+    assert [(fila.talle, fila.cantidad) for fila in actualizado.stocks_talles] == [("3", 5)]

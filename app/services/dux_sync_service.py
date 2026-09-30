@@ -1,10 +1,10 @@
-import time
-import re
 import httpx
+from decimal import Decimal
 from app.integrations.dux.client import DuxClient
+from app.core.config import settings
 from slugify import slugify
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.categoria import Categoria
 
@@ -13,10 +13,13 @@ from datetime import date
 from app.models.producto import Producto
 from app.models.precio_producto import PrecioProducto
 from app.models.stock_producto import StockProducto
-from app.models.stock_talle_producto import StockTalleProducto
 from app.models.imagen_producto import ImagenProducto
 from app.repositories.reserva_stock_repository import reconciliar_reservas_enviadas
 from app.models.codigo_barra_producto import CodigoBarraProducto
+from app.services.stock_fuente_service import (
+    es_stock_del_deposito_dux,
+    sumar_stock_deposito_dux,
+)
 
 
 def _es_error_formato_items(error: httpx.HTTPStatusError) -> bool:
@@ -24,8 +27,11 @@ def _es_error_formato_items(error: httpx.HTTPStatusError) -> bool:
 
 
 def _obtener_pagina_items_dux(dux: DuxClient, offset: int, limit: int) -> tuple[dict, list[int]]:
+    parametros = {"limit": limit, "offset": offset}
+    if settings.DUX_ID_DEPOSITO is not None:
+        parametros["id_deposito"] = settings.DUX_ID_DEPOSITO
     try:
-        return dux.get("v2/items", params={"limit": limit, "offset": offset}), []
+        return dux.get("v2/items", params=parametros), []
     except httpx.HTTPStatusError as error:
         if not _es_error_formato_items(error):
             raise
@@ -38,7 +44,10 @@ def _obtener_pagina_items_dux(dux: DuxClient, offset: int, limit: int) -> tuple[
         if total is not None and posicion >= total:
             break
         try:
-            respuesta = dux.get("v2/items", params={"limit": 1, "offset": posicion}, reintentos=1)
+            parametros_item = {"limit": 1, "offset": posicion}
+            if settings.DUX_ID_DEPOSITO is not None:
+                parametros_item["id_deposito"] = settings.DUX_ID_DEPOSITO
+            respuesta = dux.get("v2/items", params=parametros_item, reintentos=1)
             productos.extend(respuesta.get("datos") or [])
             paginacion = respuesta.get("paginacion") or {}
             if paginacion.get("total") is not None:
@@ -50,7 +59,6 @@ def _obtener_pagina_items_dux(dux: DuxClient, offset: int, limit: int) -> tuple[
                 raise
             omitidos.append(posicion)
             print(f"⚠️ Registro Dux omitido temporalmente en offset={posicion}: Formato desconocido.")
-        time.sleep(0.25)
 
     if total is None:
         raise RuntimeError("Dux no permitió determinar el total del catálogo al recuperar una página defectuosa.")
@@ -340,7 +348,7 @@ def sincronizar_producto_desde_dux(
     producto = db.scalar(
         select(Producto).where(
             Producto.dux_codigo == dux_codigo
-        )
+        ).with_for_update()
     )
 
     # =====================================================
@@ -494,7 +502,6 @@ def sincronizar_producto_desde_dux(
     # =====================================================
 
     stocks_dux = producto_dux.get("stock") or []
-    talles_dux: dict[str, int] = {}
     for stock_dux in stocks_dux:
         stock = StockProducto(
             dux_id_deposito=stock_dux["id"],
@@ -529,23 +536,8 @@ def sincronizar_producto_desde_dux(
             stock
         )
 
-        valor_talle = str(stock_dux.get("talle") or "").strip()
-        talle = re.sub(r"^talle\s*", "", valor_talle, flags=re.IGNORECASE).strip()
-        if talle:
-            talles_dux[talle] = talles_dux.get(talle, 0) + max(int(stock_dux.get("stock_disponible") or 0), 0)
-
-    # Solo Dux toma el control de los talles cuando realmente informa al menos
-    # uno válido. Un payload sin talles nunca borra la distribución manual.
-    if talles_dux:
-        existentes = {item.talle: item for item in producto.stocks_talles}
-        for item in existentes.values():
-            if item.origen == "dux" and item.talle not in talles_dux:
-                item.cantidad = 0
-        for talle, cantidad in talles_dux.items():
-            item = existentes.get(talle) or StockTalleProducto(producto=producto, talle=talle)
-            item.cantidad = cantidad
-            item.origen = "dux"
-            db.add(item)
+    # Los talles son una distribución propia de la tienda. Dux sólo aporta el
+    # total de stock del artículo y nunca crea, modifica ni elimina talles web.
 
     # =====================================================
     # CÓDIGOS DE BARRA
@@ -598,35 +590,17 @@ def sincronizar_catalogo_dux(
 
     dux = DuxClient()
 
-    limit = 20
+    limit = 50
     offset = 0
 
     procesados = 0
     errores = 0
     codigos_sincronizados: set[str] = set()
     offsets_omitidos: list[int] = []
-    categorias_activas = set(db.scalars(select(Categoria.id).where(Categoria.activo.is_(True))).all())
-    subcategorias_activas = set(db.scalars(select(Subcategoria.id).where(Subcategoria.activo.is_(True))).all())
-    marcas_activas = set(db.scalars(select(Marca.id).where(Marca.activo.is_(True))).all())
+    catalogo_dux: list[dict] = []
 
-    # Las categorías, subcategorías y marcas disponibles se
-    # reconstruyen a partir del catálogo completo recibido.
-    db.execute(
-        update(Categoria).where(Categoria.dux_id.is_not(None)).values(
-            activo=False
-        )
-    )
-    db.execute(
-        update(Subcategoria).where(Subcategoria.dux_id.is_not(None)).values(
-            activo=False
-        )
-    )
-    db.execute(
-        update(Marca).values(
-            activo=False
-        )
-    )
-
+    # Primero descargamos el snapshot completo. Así no mantenemos una
+    # transacción de escritura abierta durante los minutos que tarda la API.
     while True:
 
         print()
@@ -639,68 +613,16 @@ def sincronizar_catalogo_dux(
         offsets_omitidos.extend(omitidos_pagina)
         errores += len(omitidos_pagina)
 
-        productos_dux = respuesta.get(
-            "datos",
-            [],
-        )
+        productos_pagina = respuesta.get("datos") or []
 
         paginacion = respuesta.get(
             "paginacion",
             {},
         )
 
-        if not productos_dux:
+        if not productos_pagina:
             break
-
-        for producto_dux in productos_dux:
-
-            codigo = producto_dux.get(
-                "cod_item"
-            )
-
-            nombre = producto_dux.get(
-                "item"
-            )
-
-            try:
-
-                sincronizar_producto_desde_dux(
-                    db,
-                    producto_dux,
-                )
-
-                procesados += 1
-
-                codigo_sincronizado = producto_dux.get(
-                    "cod_item"
-                )
-
-                if codigo_sincronizado is not None:
-                    codigos_sincronizados.add(
-                        str(codigo_sincronizado).strip()
-                    )
-
-            except Exception as error:
-
-                errores += 1
-
-                print(
-                    f"❌ Error producto "
-                    f"{codigo} - {nombre}: "
-                    f"{error}"
-                )
-
-                raise
-
-        # Enviamos los cambios de la página a PostgreSQL sin
-        # confirmarlos todavía. El catálogo se confirma como
-        # una única operación al finalizar todas las páginas.
-        db.flush()
-
-        print(
-            f"✅ Página procesada | "
-            f"Procesados: {procesados}"
-        )
+        catalogo_dux.extend(productos_pagina)
 
         if not paginacion.get(
             "hay_mas",
@@ -710,15 +632,66 @@ def sincronizar_catalogo_dux(
 
         offset += limit
 
-        # Evitamos bombardear la API.
-        time.sleep(1)
-
-    if not codigos_sincronizados:
+    codigos_recibidos = {
+        str(producto.get("cod_item") or "").strip()
+        for producto in catalogo_dux
+        if str(producto.get("cod_item") or "").strip()
+    }
+    if not codigos_recibidos:
         raise RuntimeError(
             "Dux devolvió un catálogo vacío; se cancela "
             "la sincronización para no deshabilitar todos "
             "los productos locales."
         )
+
+    categorias_activas = set(db.scalars(
+        select(Categoria.id).where(Categoria.activo.is_(True))
+    ).all())
+    subcategorias_activas = set(db.scalars(
+        select(Subcategoria.id).where(Subcategoria.activo.is_(True))
+    ).all())
+    marcas_activas = set(db.scalars(
+        select(Marca.id).where(Marca.activo.is_(True))
+    ).all())
+
+    # Bloqueamos los productos existentes en el mismo orden que usa el
+    # checkout. Incluimos también los ausentes, que pueden deshabilitarse al
+    # final. La aplicación queda atómica y no compite con la validación final
+    # de un pedido.
+    db.execute(
+        select(Producto.id)
+        .order_by(Producto.id)
+        .with_for_update()
+    ).all()
+
+    # Las categorías, subcategorías y marcas se reconstruyen recién después
+    # de haber recibido un snapshot utilizable.
+    db.execute(
+        update(Categoria).where(Categoria.dux_id.is_not(None)).values(activo=False)
+    )
+    db.execute(
+        update(Subcategoria).where(Subcategoria.dux_id.is_not(None)).values(activo=False)
+    )
+    db.execute(update(Marca).values(activo=False))
+
+    for producto_dux in catalogo_dux:
+        codigo = producto_dux.get("cod_item")
+        nombre = producto_dux.get("item")
+        try:
+            sincronizar_producto_desde_dux(db, producto_dux)
+            procesados += 1
+            codigo_sincronizado = str(codigo or "").strip()
+            if codigo_sincronizado:
+                codigos_sincronizados.add(codigo_sincronizado)
+            if procesados % limit == 0:
+                db.flush()
+                print(f"✅ Productos aplicados: {procesados}")
+        except Exception as error:
+            errores += 1
+            print(f"❌ Error producto {codigo} - {nombre}: {error}")
+            raise
+
+    db.flush()
 
     deshabilitados_ausentes = 0
     if not offsets_omitidos:
@@ -726,7 +699,10 @@ def sincronizar_catalogo_dux(
         resultado_ausentes = db.execute(
             update(Producto)
             .values(habilitado=False)
-            .where(Producto.dux_codigo.not_in(codigos_sincronizados), Producto.origen == "dux")
+            .where(
+                Producto.dux_codigo.not_in(codigos_sincronizados),
+                Producto.origen.in_(("dux", "wordpress_dux")),
+            )
         )
         deshabilitados_ausentes = max(resultado_ausentes.rowcount or 0, 0)
     else:
@@ -753,4 +729,113 @@ def sincronizar_catalogo_dux(
             deshabilitados_ausentes
         ),
         "offsets_omitidos": offsets_omitidos,
+    }
+
+
+def comparar_stock_dux(db: Session) -> dict:
+    """Audita Dux contra el snapshot local sin modificar ninguna fuente."""
+
+    dux = DuxClient()
+    offset = 0
+    limit = 50
+    diferencias: list[dict] = []
+    consultados = 0
+    codigos_dux: set[str] = set()
+    catalogo_dux: list[dict] = []
+
+    while True:
+        respuesta, omitidos = _obtener_pagina_items_dux(dux, offset, limit)
+        if omitidos:
+            raise RuntimeError(
+                "Dux no pudo devolver el catálogo completo; la auditoría se canceló."
+            )
+        items = respuesta.get("datos") or []
+        if not items:
+            break
+        catalogo_dux.extend(items)
+        paginacion = respuesta.get("paginacion") or {}
+        if not paginacion.get("hay_mas", False):
+            break
+        offset += limit
+
+    productos = db.scalars(
+        select(Producto).options(selectinload(Producto.stocks))
+    ).all()
+    productos_por_codigo = {producto.dux_codigo: producto for producto in productos}
+
+    for item in catalogo_dux:
+        codigo = str(item.get("cod_item") or "").strip()
+        if not codigo:
+            continue
+        codigos_dux.add(codigo)
+        producto = productos_por_codigo.get(codigo)
+        stock_dux = max(
+            sum(
+                (
+                    Decimal(str(stock.get("stock_disponible") or 0))
+                    for stock in item.get("stock") or []
+                    if es_stock_del_deposito_dux(int(stock["id"]))
+                ),
+                start=Decimal("0"),
+            ),
+            Decimal("0"),
+        )
+        stock_local = (
+            max(sumar_stock_deposito_dux(producto.stocks), Decimal("0"))
+            if producto is not None
+            else None
+        )
+        consultados += 1
+        if producto is None or stock_local != stock_dux:
+            diferencias.append({
+                "codigo": codigo,
+                "nombre": item.get("item"),
+                "producto_id": producto.id if producto else None,
+                "stock_dux": float(stock_dux),
+                "stock_snapshot_local": float(stock_local) if stock_local is not None else None,
+                "estado": "sin_snapshot" if producto is None else "desactualizado",
+            })
+
+    web_sin_vinculo = [
+        producto
+        for producto in productos
+        if producto.wordpress_id is not None
+        and producto.visible_tienda
+        and producto.habilitado
+        and (
+            producto.conciliacion_estado != "vinculado"
+            or producto.dux_codigo not in codigos_dux
+        )
+    ]
+    dux_sin_producto_web = [
+        codigo
+        for codigo in codigos_dux
+        if (
+            (producto := productos_por_codigo.get(codigo)) is None
+            or producto.wordpress_id is None
+        )
+    ]
+    return {
+        "solo_lectura": True,
+        "deposito_dux": settings.DUX_ID_DEPOSITO,
+        "consultados": consultados,
+        "total_diferencias_snapshot": len(diferencias),
+        "diferencias_snapshot": diferencias,
+        "productos_web_sin_vinculo": {
+            "total": len(web_sin_vinculo),
+            "muestra": [
+                {
+                    "producto_id": producto.id,
+                    "wordpress_id": producto.wordpress_id,
+                    "codigo_actual": producto.dux_codigo,
+                    "nombre": producto.nombre,
+                }
+                for producto in web_sin_vinculo[:100]
+            ],
+        },
+        "productos_dux_sin_producto_web": {
+            "total": len(dux_sin_producto_web),
+            "muestra_codigos": sorted(dux_sin_producto_web)[:100],
+        },
+        "listo_para_activar": not diferencias and not web_sin_vinculo,
     }

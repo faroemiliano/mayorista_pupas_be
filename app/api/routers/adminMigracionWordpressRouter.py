@@ -8,6 +8,12 @@ from app.database.session import get_db
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
 from app.services.conciliacion_productos_service import vincular_coincidencia_manual
+from app.services.conciliacion_productos_background_service import (
+    aplicar_coincidencias_seguras_con_estado,
+    ejecutar_generacion_conciliacion_background,
+    obtener_estado_conciliacion,
+    preparar_generacion_conciliacion,
+)
 from app.services.migracion_wordpress_background_service import (
     ejecutar_migracion_wordpress_background,
     obtener_estado_migracion,
@@ -28,6 +34,10 @@ class VincularProductoRequest(BaseModel):
 
 
 class EjecutarMigracionRequest(BaseModel):
+    confirmar: bool
+
+
+class AplicarCoincidenciasRequest(BaseModel):
     confirmar: bool
 
 
@@ -95,6 +105,32 @@ def _resumir_pedido(datos: dict) -> dict:
     }
 
 
+def _obtener_reporte_conciliacion(db: Session) -> MigracionWooCommerce | None:
+    return db.scalar(select(MigracionWooCommerce).where(
+        MigracionWooCommerce.tipo == "conciliacion",
+        MigracionWooCommerce.id_externo == "productos-wordpress-dux",
+    ))
+
+
+def _paginar_reporte(
+    items: list[dict], page: int, limit: int, buscar: str | None,
+) -> dict:
+    if buscar and (termino := buscar.strip().lower()):
+        items = [
+            item for item in items
+            if termino in " ".join(str(valor or "").lower() for valor in item.values())
+        ]
+    total = len(items)
+    inicio = (page - 1) * limit
+    return {
+        "items": items[inicio:inicio + limit],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_paginas": (total + limit - 1) // limit if total else 0,
+    }
+
+
 @router.get("/resumen")
 def obtener_resumen(db: Session = Depends(get_db)):
     def filas(tipo: str, limite: int):
@@ -147,10 +183,7 @@ def ejecutar_migracion(
 
 @router.get("/conciliacion-productos")
 def obtener_conciliacion_productos(db: Session = Depends(get_db)):
-    fila = db.scalar(select(MigracionWooCommerce).where(
-        MigracionWooCommerce.tipo == "conciliacion",
-        MigracionWooCommerce.id_externo == "productos-wordpress-dux",
-    ))
+    fila = _obtener_reporte_conciliacion(db)
     if fila is None:
         return {"disponible": False}
     datos = fila.datos
@@ -167,15 +200,101 @@ def obtener_conciliacion_productos(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/conciliacion-productos/ejecucion")
+def estado_ejecucion_conciliacion(db: Session = Depends(get_db)):
+    return obtener_estado_conciliacion(db)
+
+
+@router.post(
+    "/conciliacion-productos/generar",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generar_informe_conciliacion(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        estado_actual = preparar_generacion_conciliacion(db)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(
+        ejecutar_generacion_conciliacion_background,
+        estado_actual["ejecucion_id"],
+    )
+    return estado_actual
+
+
+@router.post("/conciliacion-productos/aplicar-seguras")
+def aplicar_coincidencias(
+    data: AplicarCoincidenciasRequest,
+    db: Session = Depends(get_db),
+):
+    if not data.confirmar:
+        raise HTTPException(
+            status_code=422,
+            detail="Debe confirmarse la vinculación de las coincidencias seguras.",
+        )
+    try:
+        return aplicar_coincidencias_seguras_con_estado(db)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/conciliacion-productos/solo-wordpress")
+def listar_productos_solo_wordpress(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    buscar: str | None = Query(default=None, max_length=150),
+    db: Session = Depends(get_db),
+):
+    fila = _obtener_reporte_conciliacion(db)
+    if fila is None:
+        return _paginar_reporte([], page, limit, buscar)
+    wordpress_ids_vinculados = {
+        str(wordpress_id)
+        for wordpress_id in db.scalars(select(Producto.wordpress_id).where(
+            Producto.conciliacion_estado == "vinculado",
+            Producto.wordpress_id.is_not(None),
+        )).all()
+    }
+    items = [
+        dict(item)
+        for item in fila.datos.get("solo_wordpress") or []
+        if str(item.get("wordpress_id")) not in wordpress_ids_vinculados
+    ]
+    return _paginar_reporte(items, page, limit, buscar)
+
+
+@router.get("/conciliacion-productos/solo-dux")
+def listar_productos_solo_dux(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    buscar: str | None = Query(default=None, max_length=150),
+    db: Session = Depends(get_db),
+):
+    fila = _obtener_reporte_conciliacion(db)
+    if fila is None:
+        return _paginar_reporte([], page, limit, buscar)
+    codigos_vinculados = {
+        str(codigo).strip()
+        for codigo in db.scalars(select(Producto.dux_codigo).where(
+            Producto.conciliacion_estado == "vinculado",
+        )).all()
+    }
+    items = [
+        dict(item)
+        for item in fila.datos.get("solo_dux") or []
+        if str(item.get("dux_codigo") or "").strip() not in codigos_vinculados
+    ]
+    return _paginar_reporte(items, page, limit, buscar)
+
+
 @router.get("/conciliacion-productos/dudosos")
 def listar_productos_dudosos(
     page: int = Query(default=1, ge=1), limit: int = Query(default=20, ge=1, le=100),
     buscar: str | None = Query(default=None, max_length=150), db: Session = Depends(get_db),
 ):
-    fila = db.scalar(select(MigracionWooCommerce).where(
-        MigracionWooCommerce.tipo == "conciliacion",
-        MigracionWooCommerce.id_externo == "productos-wordpress-dux",
-    ))
+    fila = _obtener_reporte_conciliacion(db)
     if fila is None:
         return {"items": [], "total": 0, "page": page, "limit": limit, "total_paginas": 0}
     vinculados = set(db.scalars(select(Producto.wordpress_id).where(

@@ -1,5 +1,6 @@
 import base64
 import binascii
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -15,6 +16,9 @@ class DuxClient:
     )
     IMAGE_HOST = "erp.duxsoftware.com.ar"
     IMAGE_PATH = "/servicioimagenes/images/"
+    MIN_REQUEST_INTERVAL_SECONDS = 5.0
+    _rate_limit_lock = threading.Lock()
+    _last_request_started_at = 0.0
 
     def __init__(self) -> None:
         self.token = settings.DUX_API_TOKEN
@@ -25,6 +29,17 @@ class DuxClient:
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         }
+
+    @classmethod
+    def _wait_for_rate_limit(cls) -> None:
+        """Serializa inicios de requests para respetar el límite público Dux."""
+
+        with cls._rate_limit_lock:
+            elapsed = time.monotonic() - cls._last_request_started_at
+            remaining = cls.MIN_REQUEST_INTERVAL_SECONDS - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+            cls._last_request_started_at = time.monotonic()
 
     def get(
         self,
@@ -44,6 +59,7 @@ class DuxClient:
             reintentos + 1,
         ):
             try:
+                self._wait_for_rate_limit()
                 response = httpx.get(
                     url,
                     headers=self._headers(),
@@ -65,13 +81,17 @@ class DuxClient:
                     f"(intento {intento}/{reintentos})"
                 )
 
-                # Reintentamos solamente errores
-                # temporales del servidor.
+                # Reintentamos solamente errores temporales o de rate limit.
                 if (
-                    status in {500, 502, 503, 504}
+                    status in {429, 500, 502, 503, 504}
                     and intento < reintentos
                 ):
-                    time.sleep(2 * intento)
+                    retry_after = error.response.headers.get("Retry-After")
+                    try:
+                        espera = float(retry_after) if retry_after else 5.0 * intento
+                    except ValueError:
+                        espera = 5.0 * intento
+                    time.sleep(max(espera, self.MIN_REQUEST_INTERVAL_SECONDS))
                     continue
 
                 print(
@@ -101,6 +121,7 @@ class DuxClient:
         if not settings.DUX_ESCRITURA_HABILITADA:
             raise RuntimeError("La escritura en Dux está deshabilitada por configuración.")
         url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+        self._wait_for_rate_limit()
         response = httpx.post(url, headers=self._headers(), params=params, json=json, timeout=30.0)
         response.raise_for_status()
         return response.json()
