@@ -1,4 +1,6 @@
 from sqlalchemy import (
+    DateTime,
+    cast,
     func,
     or_,
     select,
@@ -406,14 +408,20 @@ def get_productos(
     elif orden == "recientes":
 
         query = query.order_by(
-            Producto.fecha_creacion_dux.desc().nulls_last(),
+            func.coalesce(
+                cast(Producto.fecha_creacion_dux, DateTime),
+                Producto.creado_en,
+            ).desc().nulls_last(),
             Producto.id.desc(),
         )
 
     elif orden == "antiguos":
 
         query = query.order_by(
-            Producto.fecha_creacion_dux.asc().nulls_last(),
+            func.coalesce(
+                cast(Producto.fecha_creacion_dux, DateTime),
+                Producto.creado_en,
+            ).asc().nulls_last(),
             Producto.id.asc(),
         )
 

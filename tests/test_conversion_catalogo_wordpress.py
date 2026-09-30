@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from datetime import datetime
 
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
@@ -14,6 +15,7 @@ def test_convierte_producto_wordpress_sin_perder_variaciones(db):
         MigracionWooCommerce(tipo="categoria", id_externo="2", checksum="b" * 64, datos={"id": 2, "name": "Invierno", "slug": "invierno", "parent": 1}),
         MigracionWooCommerce(tipo="producto", id_externo="10", checksum="c" * 64, datos={
             "id": 10, "name": "Pijama Luna", "slug": "pijama-luna", "status": "publish", "type": "variable",
+            "date_created_gmt": "2026-09-15T12:30:00",
             "description": "Descripción", "sku": "", "categories": [{"id": 2, "name": "Invierno"}],
             "images": [{"src": "https://example.com/1.jpg"}, {"src": "https://example.com/2.jpg"}],
             "_variaciones_completas": [
@@ -36,6 +38,7 @@ def test_convierte_producto_wordpress_sin_perder_variaciones(db):
     assert [(item.talle, item.cantidad) for item in producto.stocks_talles] == [("1", 3), ("Kids", 2)]
     assert int(producto.stocks[0].stock_disponible) == 5
     assert len(producto.imagenes) == 2
+    assert producto.creado_en.replace(tzinfo=None) == datetime(2026, 9, 15, 12, 30)
 
     repeticion = convertir_catalogo_wordpress(db)
     db.refresh(producto)

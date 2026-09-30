@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 
 from slugify import slugify
 from sqlalchemy import select
@@ -20,6 +21,15 @@ def _decimal(valor) -> Decimal | None:
     try:
         return Decimal(str(valor)) if valor not in (None, "") else None
     except (InvalidOperation, ValueError):
+        return None
+
+
+def _fecha(valor: str | None) -> datetime | None:
+    if not valor:
+        return None
+    try:
+        return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    except ValueError:
         return None
 
 
@@ -123,6 +133,9 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
         producto.slug = _slug_unico(db, Producto, datos.get("slug") or producto.nombre, wordpress_id, producto.id)
         producto.codigo_externo = (datos.get("sku") or "").strip() or None
         producto.descripcion = datos.get("description") or datos.get("short_description") or None
+        fecha_alta_wordpress = _fecha(datos.get("date_created_gmt") or datos.get("date_created"))
+        if fecha_alta_wordpress is not None:
+            producto.creado_en = fecha_alta_wordpress
         publicado = datos.get("status") == "publish"
         producto.habilitado = publicado
         producto.visible_tienda = publicado
