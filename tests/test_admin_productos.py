@@ -148,6 +148,25 @@ def test_admin_puede_ocultar_producto_solo_en_la_tienda(client, db):
     assert administracion.json()["items"][0]["visible_tienda"] is False
 
 
+def test_admin_crea_producto_web_con_talles_y_precios(client):
+    response = client.post("/api/admin/productos/", json={
+        "codigo": "WEB-NUEVO-001",
+        "nombre": "Producto nuevo web",
+        "descripcion": "Creado desde administración.",
+        "categoria_id": None,
+        "subcategoria_id": None,
+        "marca_id": None,
+        "precio_mayorista": "1000.00",
+        "precio_24_productos": "900.00",
+        "cantidad_unidades_por_bulto": 6,
+        "talles": [{"talle": "S", "cantidad": 2}, {"talle": "M", "cantidad": 4}],
+        "habilitado": True,
+        "visible_tienda": True,
+    })
+
+    assert response.status_code == 201, response.text
+
+
 def test_admin_distribuye_stock_dux_entre_talles(client, db):
     producto = crear_producto(db, 9)
     response = client.post(f"/api/admin/productos/{producto.id}/stock-talles", json={
