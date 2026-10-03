@@ -56,6 +56,37 @@ def _talle(variacion: dict) -> str | None:
     return next(iter(atributos.values()), None)
 
 
+def _sincronizar_imagenes_wordpress(producto: Producto, datos: dict) -> None:
+    urls = [imagen["src"] for imagen in datos.get("images") or [] if imagen.get("src")]
+    existentes: dict[str, ImagenProducto] = {}
+    for imagen in list(producto.imagenes):
+        # Las filas anteriores a Cloudinary no tenían ``origen_url``. Toda URL
+        # externa existente se toma como fuente de WordPress una única vez.
+        origen = imagen.origen_url or (imagen.url if not imagen.url.startswith("db:") else None)
+        if origen:
+            imagen.origen_url = origen
+            existentes[origen] = imagen
+
+    for origen, imagen in list(existentes.items()):
+        if origen not in urls:
+            producto.imagenes.remove(imagen)
+
+    principal: ImagenProducto | None = None
+    for orden, url in enumerate(urls):
+        imagen = existentes.get(url)
+        if imagen is None:
+            imagen = ImagenProducto(url=url, origen_url=url)
+            producto.imagenes.append(imagen)
+        imagen.orden = orden
+        imagen.principal = orden == 0
+        if imagen.principal:
+            principal = imagen
+    if principal:
+        producto.imagen_url = principal.url
+    elif not urls:
+        producto.imagen_url = None
+
+
 def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
     filas_categorias = db.scalars(select(MigracionWooCommerce).where(MigracionWooCommerce.tipo == "categoria")).all()
     datos_categorias = {int(fila.id_externo): fila.datos for fila in filas_categorias}
@@ -158,7 +189,6 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
             producto.stocks.clear()
             producto.stocks_talles.clear()
         producto.variaciones.clear()
-        producto.imagenes.clear()
         db.flush()
 
         variaciones = datos.get("_variaciones_completas") or []
@@ -202,18 +232,13 @@ def convertir_catalogo_wordpress(db: Session, progreso=None) -> dict:
                 for talle, cantidad in sorted(stock_por_talle.items())
             ]
 
-        imagenes = datos.get("images") or []
-        producto.imagen_url = imagenes[0].get("src") if imagenes else None
-        producto.imagenes = [
-            ImagenProducto(url=imagen["src"], orden=orden, principal=orden == 0)
-            for orden, imagen in enumerate(imagenes) if imagen.get("src")
-        ]
+        _sincronizar_imagenes_wordpress(producto, datos)
         db.flush()
         resultado["procesados"] += 1
         resultado["creados" if creado else "actualizados"] += 1
         resultado["publicados"] += int(publicado)
         resultado["variaciones"] += len(variaciones)
-        resultado["imagenes"] += len(producto.imagenes)
+        resultado["imagenes"] += len(datos.get("images") or [])
         if progreso and resultado["procesados"] % 50 == 0:
             progreso(resultado.copy())
     db.commit()

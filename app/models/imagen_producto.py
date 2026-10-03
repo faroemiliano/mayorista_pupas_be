@@ -41,6 +41,10 @@ class ImagenProducto(Base):
         nullable=False,
     )
 
+    # URL original de WordPress. Se conserva cuando ``url`` pasa a ser la
+    # entrega de Cloudinary para que una importación repetida no duplique fotos.
+    origen_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     contenido: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     media_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
