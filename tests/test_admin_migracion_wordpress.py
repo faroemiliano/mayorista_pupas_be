@@ -71,10 +71,10 @@ def test_admin_inicia_importacion_protegida_en_segundo_plano(client, monkeypatch
     ejecutado = []
     monkeypatch.setattr(
         "app.api.routers.adminMigracionWordpressRouter.ejecutar_migracion_wordpress_background",
-        lambda: ejecutado.append(True),
+        lambda actualizar_todo=False: ejecutado.append(actualizar_todo),
     )
 
-    response = client.post("/api/admin/migracion-wordpress/ejecutar", json={"confirmar": True})
+    response = client.post("/api/admin/migracion-wordpress/ejecutar", json={"confirmar": True, "actualizar_todo": True})
     assert response.status_code == 202, response.text
     assert response.json()["estado"] == "en_progreso"
     assert ejecutado == [True]

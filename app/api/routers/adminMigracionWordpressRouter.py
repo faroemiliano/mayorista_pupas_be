@@ -35,6 +35,7 @@ class VincularProductoRequest(BaseModel):
 
 class EjecutarMigracionRequest(BaseModel):
     confirmar: bool
+    actualizar_todo: bool = False
 
 
 class AplicarCoincidenciasRequest(BaseModel):
@@ -177,7 +178,7 @@ def ejecutar_migracion(
         estado_actual = preparar_migracion_wordpress(db)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    background_tasks.add_task(ejecutar_migracion_wordpress_background)
+    background_tasks.add_task(ejecutar_migracion_wordpress_background, data.actualizar_todo)
     return estado_actual
 
 
