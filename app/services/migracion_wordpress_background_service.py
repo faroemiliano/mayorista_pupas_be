@@ -16,6 +16,10 @@ from app.services.migracion_woocommerce_service import (
     importar_todos_clientes_y_pedidos,
     importar_todos_productos,
 )
+from app.services.migracion_imagenes_cloudinary_service import (
+    _configurar_cloudinary,
+    migrar_imagenes_a_cloudinary,
+)
 
 
 TIPO_ESTADO = "estado_migracion"
@@ -81,6 +85,9 @@ def ejecutar_migracion_wordpress_background(actualizar_todo: bool = False) -> No
             def cantidad(tipo: str) -> int:
                 return db.scalar(select(func.count(MigracionWooCommerce.id)).where(MigracionWooCommerce.tipo == tipo)) or 0
 
+            _estado(db, etapa="validando_cloudinary", progreso=None)
+            _configurar_cloudinary()
+
             _estado(db, etapa="categorias", progreso=None)
             categorias = {"omitido": True, "existentes": cantidad("categoria")} if not actualizar_todo and cantidad("categoria") >= 10 else importar_todas_categorias(db)
 
@@ -112,11 +119,16 @@ def ejecutar_migracion_wordpress_background(actualizar_todo: bool = False) -> No
             pedidos = convertir_pedidos_wordpress(
                 db, progreso=lambda total: _estado(db, progreso=total)
             )
+            _estado(db, etapa="copiando_imagenes_cloudinary", progreso={"procesadas": 0})
+            imagenes = migrar_imagenes_a_cloudinary(
+                db, progreso=lambda total: _estado(db, progreso=total)
+            )
             archivados = _activar_catalogo_wordpress(db)
             resultado = {
                 "actualizacion_completa": actualizar_todo,
                 "categorias": categorias, "productos_staging": productos, "staging": staging,
                 "catalogo": catalogo, "clientes": clientes, "pedidos": pedidos,
+                "imagenes_cloudinary": imagenes,
                 "productos_dux_ocultados": archivados,
             }
             _estado(

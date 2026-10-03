@@ -97,7 +97,7 @@ def preparar_migracion_imagenes_cloudinary(db: Session) -> dict:
     )
 
 
-def migrar_imagenes_a_cloudinary(db: Session) -> dict:
+def migrar_imagenes_a_cloudinary(db: Session, progreso=None) -> dict:
     try:
         _configurar_cloudinary()
         imagenes = _imagenes_pendientes(db)
@@ -117,10 +117,13 @@ def migrar_imagenes_a_cloudinary(db: Session) -> dict:
                     errores.append({"imagen_id": imagen.id, "error": str(error)[:300]})
             if indice % 10 == 0 or indice == total:
                 db.commit()
-                _estado(db, estado="en_progreso", progreso={
+                avance = {
                     "total": total, "procesadas": indice, "pendientes": total - indice,
                     "copiadas": copiadas, "fallidas": fallidas,
-                }, errores=errores)
+                }
+                _estado(db, estado="en_progreso", progreso=avance, errores=errores)
+                if progreso:
+                    progreso(avance)
         resultado = {
             "procesadas": total, "copiadas": copiadas, "fallidas": fallidas,
             "pendientes_para_reintentar": len(_imagenes_pendientes(db)),
