@@ -42,7 +42,7 @@ services:
       - key: WORDPRESS_MIGRATION_SECRET
         sync: false
       - key: CORS_ORIGINS
-        sync: false
+        value: https://mayorista-pupas-fe.vercel.app,https://pupasmayorista.com.ar,https://www.pupasmayorista.com.ar
       - key: DUX_ESCRITURA_HABILITADA
         value: "false"
       - key: DUX_ENVIO_AUTOMATICO_PEDIDOS_HABILITADO

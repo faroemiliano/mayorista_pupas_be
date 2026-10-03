@@ -80,11 +80,18 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [
+        configurados = [
             origin.strip().rstrip("/")
             for origin in self.CORS_ORIGINS.split(",")
             if origin.strip()
         ]
+        # Durante el cambio de dominio ambas interfaces pueden convivir.
+        transicion = [
+            "https://mayorista-pupas-fe.vercel.app",
+            "https://pupasmayorista.com.ar",
+            "https://www.pupasmayorista.com.ar",
+        ]
+        return list(dict.fromkeys([*configurados, *transicion]))
 
     model_config = SettingsConfigDict(
         env_file=".env",
