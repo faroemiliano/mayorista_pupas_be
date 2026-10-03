@@ -50,7 +50,15 @@ def _talles_catalogo(producto: Producto, reservas_talle: dict) -> list[dict]:
 def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
     parsed = urlsplit(url)
     wordpress_host = urlsplit(settings.WOOCOMMERCE_URL).hostname
-    if parsed.scheme == "https" and parsed.hostname == wordpress_host:
+    cloud_name = urlsplit(settings.CLOUDINARY_URL).hostname if settings.CLOUDINARY_URL else None
+    es_imagen_wordpress = parsed.scheme == "https" and parsed.hostname == wordpress_host
+    es_imagen_cloudinary = (
+        parsed.scheme == "https"
+        and parsed.hostname == "res.cloudinary.com"
+        and cloud_name is not None
+        and parsed.path.startswith(f"/{cloud_name}/")
+    )
+    if es_imagen_wordpress or es_imagen_cloudinary:
         response = httpx.get(url, timeout=30.0)
         response.raise_for_status()
         contenido = response.content
@@ -65,7 +73,7 @@ def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
         elif contenido.startswith(b"RIFF") and contenido[8:12] == b"WEBP":
             media_type = "image/webp"
         else:
-            raise ValueError("Formato de imagen WordPress no soportado.")
+            raise ValueError("Formato de imagen remoto no soportado.")
         return contenido, media_type
     return DuxClient().get_imagen(url)
 

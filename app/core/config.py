@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "Pupas Mayorista <onboarding@resend.dev>"
     WORDPRESS_MIGRATION_SECRET: str = ""
+    CLOUDINARY_URL: str = ""
+
+    @field_validator("CLOUDINARY_URL")
+    @classmethod
+    def validar_cloudinary_url(cls, value: str) -> str:
+        if not value:
+            return value
+        if not value.startswith("cloudinary://") or "@" not in value:
+            raise ValueError("CLOUDINARY_URL debe tener el formato cloudinary://API_KEY:API_SECRET@CLOUD_NAME")
+        return value
 
     @property
     def dux_personales_pedidos(self) -> list[int]:

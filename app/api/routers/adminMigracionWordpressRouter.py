@@ -19,6 +19,11 @@ from app.services.migracion_wordpress_background_service import (
     obtener_estado_migracion,
     preparar_migracion_wordpress,
 )
+from app.services.migracion_imagenes_cloudinary_service import (
+    ejecutar_migracion_imagenes_cloudinary_background,
+    obtener_estado_migracion_imagenes,
+    preparar_migracion_imagenes_cloudinary,
+)
 
 
 router = APIRouter(
@@ -179,6 +184,25 @@ def ejecutar_migracion(
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     background_tasks.add_task(ejecutar_migracion_wordpress_background, data.actualizar_todo)
+    return estado_actual
+
+
+@router.get("/imagenes/ejecucion")
+def estado_ejecucion_imagenes(db: Session = Depends(get_db)):
+    return obtener_estado_migracion_imagenes(db)
+
+
+@router.post("/imagenes/ejecutar", status_code=status.HTTP_202_ACCEPTED)
+def ejecutar_migracion_imagenes(
+    data: EjecutarMigracionRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+):
+    if not data.confirmar:
+        raise HTTPException(status_code=422, detail="Debe confirmarse la copia de las imágenes.")
+    try:
+        estado_actual = preparar_migracion_imagenes_cloudinary(db)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(ejecutar_migracion_imagenes_cloudinary_background)
     return estado_actual
 
 
