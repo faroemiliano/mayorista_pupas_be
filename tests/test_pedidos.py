@@ -7,6 +7,8 @@ from sqlalchemy import select
 
 from tests.test_carrito import crear_producto
 from app.models.reserva_stock import ReservaStock
+from app.models.reserva_carrito import ReservaCarrito
+from app.models.notificacion import Notificacion
 from app.models.pedido import Pedido
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.repositories.reserva_stock_repository import reconciliar_reservas_enviadas
@@ -42,6 +44,9 @@ def test_crear_pedido_guarda_totales_e_items(
     )
     db.commit()
 
+    reserva = client.put("/api/carrito/reserva", json={"items": [{"producto_id": producto.id, "talle": "1", "cantidad": 24}]})
+    assert reserva.status_code == 200, reserva.text
+
     response = client.post(
         "/api/pedidos/",
         json=pedido_payload(producto.id),
@@ -61,6 +66,16 @@ def test_crear_pedido_guarda_totales_e_items(
         f"/api/pedidos/{pedido['codigo']}"
     )
     assert consulta.status_code == 200
+    assert db.scalar(select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)) is None
+    aviso = db.scalar(select(Notificacion).where(
+        Notificacion.pedido_id == pedido["id"],
+        Notificacion.tipo == "reserva_pedido",
+    ))
+    assert aviso is not None
+    assert aviso.email_destino == "ana@example.com"
+    assert aviso.email_estado == "enviado"
+    assert "quedaron reservadas" in aviso.mensaje
+    assert "hasta la entrega" in aviso.mensaje
 
 
 def test_pedido_confirmado_programa_envio_automatico_a_dux(client: TestClient, db: Session, monkeypatch):
@@ -147,7 +162,12 @@ def test_admin_lista_y_actualiza_estado_del_pedido(
     assert actualizado.json()["estado"] == "confirmado"
 
 
-def test_admin_lista_pedidos_historicos_wordpress_como_solo_lectura(client: TestClient, db: Session):
+def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient, db: Session, monkeypatch):
+    emails = []
+    monkeypatch.setattr(
+        "app.services.notificacion_service._enviar_email",
+        lambda destino, asunto, contenido: (emails.append((destino, asunto, contenido)) or ("enviado", None)),
+    )
     historico = PedidoHistoricoWordpress(
         wordpress_id=7001, numero="7001", wordpress_customer_id=10,
         estado="completed", total=Decimal("12500"),
@@ -170,8 +190,32 @@ def test_admin_lista_pedidos_historicos_wordpress_como_solo_lectura(client: Test
     assert data["total"] == 1
     assert data["items"][0]["codigo"] == "WP-7001"
     assert data["items"][0]["origen"] == "wordpress"
-    assert data["items"][0]["solo_lectura"] is True
+    assert data["items"][0]["solo_lectura"] is False
+    assert data["items"][0]["estado"] == "confirmado"
+    assert data["items"][0]["estado_original"] == "completed"
     assert data["items"][0]["items"][0]["talle"] == "4"
+
+    actualizado = client.patch(
+        f"/api/admin/pedidos/{historico.id}/estado",
+        json={"estado": "contactado", "origen": "wordpress"},
+    )
+    assert actualizado.status_code == 200, actualizado.text
+    assert actualizado.json()["estado"] == "contactado"
+    db.refresh(historico)
+    assert historico.estado == "completed"
+    assert historico.estado_gestion == "contactado"
+    assert len(emails) == 1
+    assert emails[0][0] == "maria@test.local"
+    assert "WP-7001" in emails[0][1]
+    assert "Contactado" in emails[0][2]
+    assert "Hola María Pérez" in emails[0][2]
+
+    repetido = client.patch(
+        f"/api/admin/pedidos/{historico.id}/estado",
+        json={"estado": "contactado", "origen": "wordpress"},
+    )
+    assert repetido.status_code == 200
+    assert len(emails) == 1
 
 
 def test_crear_pedido_reserva_stock_y_evitar_sobreventa(

@@ -3,6 +3,7 @@ from math import ceil
 import secrets
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -22,6 +23,7 @@ from app.schemas.pedido_schemas import PedidoCreateRequest
 from app.repositories.reserva_stock_repository import (
     bloquear_productos,
     liberar_reservas_pedido,
+    liberar_reservas_carrito,
 )
 from app.services.carrito_service import CarritoError, calcular_carrito_service
 from app.services.notificacion_service import notificar
@@ -29,6 +31,54 @@ from app.services.notificacion_service import notificar
 
 class PedidoError(ValueError):
     pass
+
+
+ESTADO_PEDIDO_ETIQUETAS = {
+    "pendiente": "Pendiente",
+    "contactado": "Contactado",
+    "confirmado": "Confirmado",
+    "cancelado": "Cancelado",
+}
+
+ESTADO_PEDIDO_DESCRIPCIONES = {
+    "pendiente": "Recibimos tu pedido y se encuentra pendiente de revisión por nuestro equipo.",
+    "contactado": "Nuestro equipo ya tomó contacto o está coordinando los detalles necesarios para continuar.",
+    "confirmado": "Tu pedido fue confirmado y quedó preparado para continuar con el proceso comercial acordado.",
+    "cancelado": "Tu pedido fue cancelado. Si necesitás más información, podés comunicarte con nuestro equipo.",
+}
+
+
+def _notificar_estado_pedido(db: Session, *, codigo: str, estado: str, nombre: str,
+                             email: str | None, usuario_id: int | None, pedido_id: int | None) -> None:
+    etiqueta = ESTADO_PEDIDO_ETIQUETAS[estado]
+    asunto = f"Actualización de tu pedido {codigo} | Pupas Mayorista"
+    mensaje = (
+        f"Hola {nombre or 'cliente'},\n\n"
+        f"Te informamos que el estado actual de tu pedido {codigo} es: {etiqueta}.\n\n"
+        f"{ESTADO_PEDIDO_DESCRIPCIONES[estado]}\n\n"
+        "Podés consultar el seguimiento desde el sector Mi cuenta de nuestra tienda. "
+        "Ante cualquier duda, estamos a disposición para ayudarte.\n\n"
+        "Saludos,\nEquipo de Pupas Mayorista"
+    )
+    notificar(db,audiencia="cliente",tipo="estado_pedido",titulo=asunto,mensaje=mensaje,
+              usuario_id=usuario_id,pedido_id=pedido_id,email=email)
+
+
+def _notificar_reserva_pedido(db: Session, pedido: Pedido, usuario: Usuario) -> None:
+    asunto = f"Recibimos tu reserva {pedido.codigo} | Pupas Mayorista"
+    mensaje = (
+        f"Hola {pedido.cliente_nombre or usuario.nombre},\n\n"
+        f"Tu pedido {pedido.codigo} fue recibido correctamente y las unidades seleccionadas quedaron reservadas.\n\n"
+        f"Reserva: {pedido.cantidad_unidades} prendas.\n"
+        f"Total del pedido: ${pedido.total}.\n\n"
+        "Nuestro equipo revisará la información y se comunicará si necesita confirmar algún detalle. "
+        "Cuando Pupas confirme el pedido, recibirás las próximas actualizaciones por email "
+        "para que puedas seguir su avance hasta la entrega de los productos.\n\n"
+        "También podés consultar el estado en cualquier momento desde el sector Mi cuenta.\n\n"
+        "Gracias por elegirnos.\nEquipo de Pupas Mayorista"
+    )
+    notificar(db,audiencia="cliente",tipo="reserva_pedido",titulo=asunto,mensaje=mensaje,
+              usuario_id=usuario.id,pedido_id=pedido.id,email=pedido.cliente_email or usuario.email)
 
 
 def _generar_codigo(db: Session) -> str:
@@ -47,6 +97,7 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
         calculo = calcular_carrito_service(
             db,
             CarritoCalcularRequest(items=data.items),
+            usuario.id,
         )
     except CarritoError as error:
         raise PedidoError(str(error)) from error
@@ -97,12 +148,15 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
         ))
 
     db.add(pedido)
+    liberar_reservas_carrito(db, usuario.id)
     db.commit()
     db.refresh(pedido)
     notificar(db,audiencia="admin",tipo="pedido_nuevo",titulo=f"Nuevo pedido {pedido.codigo}",
               mensaje=f"{pedido.cliente_nombre} realizó un pedido por ${pedido.total} con {pedido.cantidad_unidades} unidades.",
               pedido_id=pedido.id,email=settings.EMAIL_ADMIN or None)
-    return get_pedido(db, pedido.id) or pedido
+    pedido_guardado = get_pedido(db, pedido.id) or pedido
+    _notificar_reserva_pedido(db, pedido_guardado, usuario)
+    return pedido_guardado
 
 
 def get_pedidos_service(
@@ -165,8 +219,13 @@ def _serializar_pedido_historico(pedido) -> dict:
         "descuento_aplicado": max(item.subtotal - item.total, 0),
         "subtotal": item.total,
     } for item in pedido.items]
+    estados_iniciales = {
+        "pending": "pendiente", "on-hold": "contactado", "processing": "confirmado",
+        "completed": "confirmado", "cancelled": "cancelado", "refunded": "cancelado", "failed": "cancelado",
+    }
+    estado_gestion = pedido.estado_gestion or estados_iniciales.get(pedido.estado, "pendiente")
     return {
-        "id": pedido.id, "codigo": f"WP-{pedido.numero}", "estado": pedido.estado,
+        "id": pedido.id, "codigo": f"WP-{pedido.numero}", "estado": estado_gestion,
         "cliente_nombre": nombre or "Cliente histórico",
         "cliente_telefono": _valor(facturacion, "phone", usuario.telefono if usuario else ""),
         "cliente_email": _valor(facturacion, "email", usuario.email if usuario else "") or None,
@@ -181,8 +240,8 @@ def _serializar_pedido_historico(pedido) -> dict:
         "creado_en": pedido.creado_en_wordpress, "actualizado_en": pedido.creado_en_wordpress,
         "dux_id_pedido": None, "dux_nro_pedido": None, "dux_id_personal": None,
         "estado_sync_dux": "historico", "error_sync_dux": None, "sincronizado_dux_en": None,
-        "items": items, "origen": "wordpress", "solo_lectura": True,
-        "wordpress_id": pedido.wordpress_id,
+        "items": items, "origen": "wordpress", "solo_lectura": False,
+        "wordpress_id": pedido.wordpress_id, "estado_original": pedido.estado,
     }
 
 
@@ -209,10 +268,29 @@ def get_pedidos_admin_service(
             "total_paginas": ceil(total / limit) if total else 0}
 
 
-def actualizar_estado_pedido_service(db: Session, pedido_id: int, estado: str) -> Pedido | None:
+def actualizar_estado_pedido_service(db: Session, pedido_id: int, estado: str, origen: str = "tienda"):
+    if origen == "wordpress":
+        from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress
+        pedido = db.scalar(select(PedidoHistoricoWordpress).where(PedidoHistoricoWordpress.id == pedido_id).with_for_update())
+        if pedido is None:
+            return None
+        estado_actual = _serializar_pedido_historico(pedido)["estado"]
+        if estado_actual == estado:
+            return _serializar_pedido_historico(pedido)
+        pedido.estado_gestion = estado
+        db.commit();db.refresh(pedido)
+        facturacion = pedido.facturacion or {}
+        usuario = db.get(Usuario,pedido.usuario_id) if pedido.usuario_id else None
+        nombre = " ".join(filter(None,[facturacion.get("first_name"),facturacion.get("last_name")])).strip()
+        _notificar_estado_pedido(db,codigo=f"WP-{pedido.numero}",estado=estado,nombre=nombre or (usuario.nombre if usuario else "cliente"),
+                                 usuario_id=pedido.usuario_id,pedido_id=None,
+                                 email=facturacion.get("email") or (usuario.email if usuario else None))
+        return _serializar_pedido_historico(pedido)
     pedido = get_pedido(db, pedido_id)
     if pedido is None:
         return None
+    if pedido.estado == estado:
+        return pedido
     if pedido.estado == "cancelado" and estado != "cancelado":
         raise PedidoError("Un pedido cancelado no puede reabrirse porque su stock ya fue liberado.")
     if estado == "cancelado":
@@ -222,8 +300,8 @@ def actualizar_estado_pedido_service(db: Session, pedido_id: int, estado: str) -
     pedido.estado = estado
     db.commit()
     db.refresh(pedido)
-    if pedido.usuario_id:
-        notificar(db,audiencia="cliente",tipo="estado_pedido",titulo=f"Tu pedido {pedido.codigo} fue actualizado",
-                  mensaje=f"El nuevo estado de tu pedido es: {estado}.",usuario_id=pedido.usuario_id,
-                  pedido_id=pedido.id,email=pedido.cliente_email)
+    usuario = db.get(Usuario,pedido.usuario_id) if pedido.usuario_id else None
+    _notificar_estado_pedido(db,codigo=pedido.codigo,estado=estado,nombre=pedido.cliente_nombre,
+                             usuario_id=pedido.usuario_id,pedido_id=pedido.id,
+                             email=pedido.cliente_email or (usuario.email if usuario else None))
     return pedido

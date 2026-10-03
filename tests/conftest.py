@@ -12,6 +12,14 @@ from app.core.security import get_usuario_opcional
 from app.models.usuario import Usuario
 
 
+@pytest.fixture(autouse=True)
+def evitar_emails_reales_en_pruebas(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.notificacion_service._enviar_email",
+        lambda _destino, _asunto, _contenido: ("enviado", None),
+    )
+
+
 @pytest.fixture
 def engine():
     test_engine = create_engine(

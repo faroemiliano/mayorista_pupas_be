@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # La condición de compra ya no utiliza el importe monetario.
     COMPRA_MINIMA: Decimal = Decimal("100000.00")
     COMPRA_MINIMA_UNIDADES: int = 6
+    CARRITO_RESERVA_MINUTOS: int = 30
 
     CORS_ORIGINS: str = (
         "http://localhost:3000,"

@@ -1,10 +1,13 @@
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.producto import Producto
+from app.models.reserva_carrito import ReservaCarrito
+from sqlalchemy import select
 from app.repositories.carrito_repository import (
     get_productos_carrito,
 )
@@ -12,7 +15,9 @@ from app.repositories.reserva_stock_repository import cantidades_reservadas, can
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
 from app.schemas.carrito_schemas import (
     CarritoCalcularRequest,
+    CarritoReservaRequest,
 )
+from app.repositories.reserva_stock_repository import bloquear_productos, liberar_reservas_carrito
 
 
 CANTIDAD_UNIDADES_PRECIO_ESPECIAL = 24
@@ -20,6 +25,36 @@ CANTIDAD_UNIDADES_PRECIO_ESPECIAL = 24
 
 class CarritoError(ValueError):
     pass
+
+
+def reservar_carrito_service(db: Session, carrito: CarritoReservaRequest, usuario_id: int) -> dict:
+    cantidades: dict[tuple[int, str], int] = defaultdict(int)
+    for item in carrito.items:
+        cantidades[(item.producto_id, item.talle.strip())] += item.cantidad
+    producto_ids = {producto_id for producto_id, _ in cantidades}
+    bloquear_productos(db, producto_ids)
+    existentes = list(db.scalars(select(ReservaCarrito).where(ReservaCarrito.usuario_id == usuario_id)).all())
+    if not cantidades:
+        for reserva in existentes: db.delete(reserva)
+        db.commit()
+        return {"items": [], "expira_en": None}
+    calcular_carrito_service(db, CarritoCalcularRequest(items=[
+        {"producto_id": producto_id, "talle": talle, "cantidad": cantidad}
+        for (producto_id, talle), cantidad in cantidades.items()
+    ]), usuario_id)
+    expira = datetime.now(timezone.utc) + timedelta(minutes=settings.CARRITO_RESERVA_MINUTOS)
+    por_clave = {(item.producto_id, item.talle): item for item in existentes}
+    for clave, reserva in por_clave.items():
+        if clave not in cantidades: db.delete(reserva)
+    for (producto_id, talle), cantidad in cantidades.items():
+        reserva = por_clave.get((producto_id, talle))
+        if reserva is None:
+            reserva = ReservaCarrito(usuario_id=usuario_id, producto_id=producto_id, talle=talle, cantidad=cantidad, expira_en=expira)
+            db.add(reserva)
+        else:
+            reserva.cantidad = cantidad; reserva.reservada_en = datetime.now(timezone.utc); reserva.expira_en = expira
+    db.commit()
+    return {"items": [{"producto_id": p, "talle": t, "cantidad": c} for (p,t),c in cantidades.items()], "expira_en": expira.isoformat()}
 
 
 def _obtener_precio(
@@ -44,6 +79,7 @@ def _obtener_precio(
 def calcular_carrito_service(
     db: Session,
     carrito: CarritoCalcularRequest,
+    usuario_id: int | None = None,
 ) -> dict:
 
     cantidades: dict[tuple[int, str], int] = defaultdict(int)
@@ -62,8 +98,8 @@ def calcular_carrito_service(
         producto.id: producto
         for producto in productos
     }
-    reservas_por_producto = cantidades_reservadas(db, producto_ids)
-    reservas_por_talle = cantidades_reservadas_por_talle(db, producto_ids)
+    reservas_por_producto = cantidades_reservadas(db, producto_ids, usuario_id)
+    reservas_por_talle = cantidades_reservadas_por_talle(db, producto_ids, usuario_id)
 
     productos_no_disponibles = sorted(
         producto_ids - set(productos_por_id)

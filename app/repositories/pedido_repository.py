@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, cast, func, literal, or_, select, union_all
+from sqlalchemy import String, and_, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.pedido import Pedido
@@ -118,7 +118,15 @@ def get_referencias_pedidos_admin(
             PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
         ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id)
         if estado:
-            wordpress = wordpress.where(PedidoHistoricoWordpress.estado == estado)
+            originales = {
+                "pendiente": ("pending",), "contactado": ("on-hold",),
+                "confirmado": ("processing", "completed"),
+                "cancelado": ("cancelled", "refunded", "failed"),
+            }.get(estado, (estado,))
+            wordpress = wordpress.where(or_(
+                PedidoHistoricoWordpress.estado_gestion == estado,
+                and_(PedidoHistoricoWordpress.estado_gestion.is_(None), PedidoHistoricoWordpress.estado.in_(originales)),
+            ))
         if buscar and (termino := buscar.strip()):
             patron = f"%{termino}%"
             wordpress = wordpress.where(or_(

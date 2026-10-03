@@ -13,6 +13,7 @@ from app.models.cliente_dux import ClienteDux
 from app.models.sincronizacion_dux import SincronizacionDux
 from app.models.notificacion import Notificacion
 from app.models.reserva_stock import ReservaStock
+from app.models.reserva_carrito import ReservaCarrito
 from app.models.stock_talle_producto import StockTalleProducto
 from app.models.material_cliente import MaterialCliente
 from app.models.migracion_woocommerce import MigracionWooCommerce

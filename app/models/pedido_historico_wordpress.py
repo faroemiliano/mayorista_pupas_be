@@ -19,6 +19,7 @@ class PedidoHistoricoWordpress(Base):
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True, index=True)
     wordpress_customer_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     estado: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    estado_gestion: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     moneda: Mapped[str] = mapped_column(String(10), nullable=False, default="ARS", server_default="ARS")
     total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     descuento_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")

@@ -107,7 +107,7 @@ def actualizar_estado_pedido(
     db: Session = Depends(get_db),
 ):
     try:
-        pedido = actualizar_estado_pedido_service(db, pedido_id, data.estado)
+        pedido = actualizar_estado_pedido_service(db, pedido_id, data.estado, data.origen)
     except PedidoError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     if pedido is None:

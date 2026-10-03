@@ -20,6 +20,15 @@ class CarritoCalcularRequest(BaseModel):
     )
 
 
+class CarritoReservaRequest(BaseModel):
+    items: list[CarritoItemRequest] = Field(default_factory=list, max_length=100)
+
+
+class CarritoReservaResponse(BaseModel):
+    items: list[CarritoItemRequest]
+    expira_en: str | None
+
+
 class CarritoItemResponse(BaseModel):
     producto_id: int
     dux_codigo: str

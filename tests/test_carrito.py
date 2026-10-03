@@ -7,6 +7,9 @@ from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.stock_talle_producto import StockTalleProducto
+from app.models.reserva_carrito import ReservaCarrito
+from app.repositories.reserva_stock_repository import cantidades_reservadas_por_talle
+from sqlalchemy import select
 
 
 def crear_producto(
@@ -48,6 +51,23 @@ def crear_producto(
     db.flush()
 
     return producto
+
+
+def test_carrito_reserva_stock_y_lo_libera_al_vaciar(client: TestClient, db: Session):
+    producto = crear_producto(db, 90)
+    db.commit()
+
+    reserva = client.put("/api/carrito/reserva", json={"items": [{
+        "producto_id": producto.id, "talle": "1", "cantidad": 5,
+    }]})
+    assert reserva.status_code == 200, reserva.text
+    assert cantidades_reservadas_por_talle(db, {producto.id})[(producto.id, "1")] == 5
+    assert db.scalar(select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)) is not None
+
+    liberada = client.put("/api/carrito/reserva", json={"items": []})
+    assert liberada.status_code == 200, liberada.text
+    assert cantidades_reservadas_por_talle(db, {producto.id}).get((producto.id, "1"), 0) == 0
+    assert db.scalar(select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)) is None
 
 
 def test_carrito_usa_precio_mayorista_antes_de_24(

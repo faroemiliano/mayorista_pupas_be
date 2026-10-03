@@ -28,6 +28,7 @@ class PedidoCreateRequest(BaseModel):
 
 class PedidoEstadoRequest(BaseModel):
     estado: PedidoEstado
+    origen: Literal["tienda", "wordpress"] = "tienda"
 
 
 class PedidoItemResponse(BaseModel):
@@ -75,6 +76,7 @@ class PedidoResponse(BaseModel):
     origen: Literal["tienda", "wordpress"] = "tienda"
     solo_lectura: bool = False
     wordpress_id: int | None = None
+    estado_original: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
