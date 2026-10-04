@@ -24,6 +24,7 @@ class UsuarioResponse(BaseModel):
     email_verificado: bool
     acepta_promociones_email: bool
     estado_registro: str
+    requiere_migracion_password: bool
     dux_id_cliente: int | None
     creado_en: datetime
 
