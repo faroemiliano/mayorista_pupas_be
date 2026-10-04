@@ -136,8 +136,9 @@ def login(data:LoginRequest,db:Session=Depends(get_db)):
 def estado_email(data: SolicitarResetPasswordRequest, db: Session = Depends(get_db)):
     usuario = get_usuario_by_email(db, data.email.strip().lower())
     requiere_migracion = _es_cuenta_wordpress(usuario, db)
-    if requiere_migracion:
-        _enviar_enlace_restablecimiento(usuario, db)
+    # Este endpoint sólo identifica la cuenta. La interfaz solicita luego el
+    # enlace una única vez; enviarlo aquí y de nuevo desde la interfaz agotaba
+    # innecesariamente la cuota diaria de Resend.
     return {"requiere_migracion": requiere_migracion}
 
 @router.post("/completar-migracion-password",response_model=AuthResponse)

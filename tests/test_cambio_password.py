@@ -78,7 +78,7 @@ def test_solicitud_reset_envia_email_html_con_logo(engine, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_cuenta_migrada_recibe_enlace_automaticamente_al_reconocer_email(engine, monkeypatch):
+def test_reconocer_cuenta_migrada_no_envia_dos_enlaces(engine, monkeypatch):
     with Session(engine) as db:
         db.add(Usuario(
             email="migrada-automatica@test.local",
@@ -118,7 +118,7 @@ def test_cuenta_migrada_recibe_enlace_automaticamente_al_reconocer_email(engine,
         assert response.status_code == 200
         assert response.json() == {"requiere_migracion": True}
         assert repetida.status_code == 200
-        assert len(enviados) == 1
+        assert len(enviados) == 0
     finally:
         app.dependency_overrides.clear()
 
