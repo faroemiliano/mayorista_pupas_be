@@ -86,10 +86,14 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
                 usuario.wordpress_id = wordpress_id
             if usuario.origen == "web":
                 usuario.origen = "web+wordpress"
-            # Toda cuenta proveniente de WordPress debe completar el cambio de
-            # contraseña en el nuevo sitio. Esto también cubre cuentas que
-            # fueron importadas previamente con una contraseña temporal.
-            if usuario.google_sub is None and usuario.rol != "admin":
+            # Sólo una cuenta sin contraseña local necesita crearla. Una
+            # actualización de migración no puede volver a bloquear a quien
+            # ya terminó el cambio de clave en la nueva tienda.
+            if (
+                usuario.google_sub is None
+                and usuario.rol != "admin"
+                and usuario.password_hash is None
+            ):
                 usuario.requiere_migracion_password = True
             if usuario.rol != "admin" and nombre_wordpress and _debe_completar_nombre(usuario):
                 usuario.nombre = nombre_wordpress

@@ -1,3 +1,4 @@
+from app.core.security import hashear_password
 from sqlalchemy import select
 
 from app.models.migracion_woocommerce import MigracionWooCommerce
@@ -50,4 +51,29 @@ def test_completa_nombre_y_apellido_de_cuenta_migrada_generica(db):
     db.refresh(usuario)
 
     assert usuario.nombre == "Ana"
+    assert usuario.apellido == "Pérez"
+
+
+def test_actualizacion_no_vuelve_a_pedir_clave_a_cliente_ya_migrado(db):
+    usuario = Usuario(
+        wordpress_id=40,
+        email="ya-migrado@test.com",
+        nombre="Ana",
+        apellido="",
+        password_hash=hashear_password("clave-segura"),
+        requiere_migracion_password=False,
+        rol="cliente",
+        estado_registro="aprobado",
+    )
+    db.add(usuario)
+    db.add(MigracionWooCommerce(tipo="cliente", id_externo="40", checksum="d" * 64, datos={
+        "id": 40, "email": "ya-migrado@test.com", "first_name": "Ana", "last_name": "Pérez",
+        "billing": {},
+    }))
+    db.commit()
+
+    convertir_clientes_wordpress(db)
+    db.refresh(usuario)
+
+    assert usuario.requiere_migracion_password is False
     assert usuario.apellido == "Pérez"
