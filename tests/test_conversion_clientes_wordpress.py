@@ -32,3 +32,22 @@ def test_convierte_cliente_y_vincula_existente_sin_cambiar_rol(db):
     assert admin.wordpress_id == 20
     assert admin.requiere_migracion_password is False
     assert db.query(UsuarioWordpress).count() == 2
+
+
+def test_completa_nombre_y_apellido_de_cuenta_migrada_generica(db):
+    usuario = Usuario(
+        email="ana@test.com", nombre="Cliente", apellido="", rol="cliente",
+        estado_registro="aprobado",
+    )
+    db.add(usuario)
+    db.add(MigracionWooCommerce(tipo="cliente", id_externo="30", checksum="c" * 64, datos={
+        "id": 30, "email": "ana@test.com", "first_name": "Ana", "last_name": "Pérez",
+        "billing": {},
+    }))
+    db.commit()
+
+    convertir_clientes_wordpress(db)
+    db.refresh(usuario)
+
+    assert usuario.nombre == "Ana"
+    assert usuario.apellido == "Pérez"

@@ -89,6 +89,10 @@ def calcular_carrito_service(
             item.cantidad
         )
 
+    cantidades_por_producto: dict[int, int] = defaultdict(int)
+    for (producto_id, _talle), cantidad in cantidades.items():
+        cantidades_por_producto[producto_id] += cantidad
+
     producto_ids = {producto_id for producto_id, _ in cantidades}
     productos = get_productos_carrito(
         db=db,
@@ -169,7 +173,8 @@ def calcular_carrito_service(
             Decimal("0.00"),
         )
 
-        if cantidad > stock_disponible:
+        cantidad_total_producto = cantidades_por_producto[producto_id]
+        if cantidad_total_producto > stock_disponible:
             raise CarritoError(
                 f"El producto {producto.id} tiene "
                 f"{stock_disponible} unidades disponibles."
@@ -225,10 +230,4 @@ def calcular_carrito_service(
             subtotal_sin_descuento - total
         ),
         "total": total,
-        "compra_minima_unidades": settings.COMPRA_MINIMA_UNIDADES,
-        "faltantes_para_compra_minima": max(
-            settings.COMPRA_MINIMA_UNIDADES - cantidad_unidades,
-            0,
-        ),
-        "cumple_compra_minima": cantidad_unidades >= settings.COMPRA_MINIMA_UNIDADES,
     }

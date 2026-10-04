@@ -12,11 +12,15 @@ from app.models.pedido_item import PedidoItem
 from app.models.reserva_stock import ReservaStock
 from app.models.usuario import Usuario
 from app.repositories.pedido_repository import (
+    estado_gestion_pedido_historico,
     get_pedido,
     get_pedido_by_codigo,
+    get_pedido_historico,
+    get_pedido_historico_by_codigo,
     get_pedidos,
     get_pedidos_por_referencias,
     get_referencias_pedidos_admin,
+    get_referencias_pedidos_usuario,
 )
 from app.schemas.carrito_schemas import CarritoCalcularRequest
 from app.schemas.pedido_schemas import PedidoCreateRequest
@@ -101,12 +105,6 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
         )
     except CarritoError as error:
         raise PedidoError(str(error)) from error
-
-    if calculo["cantidad_unidades"] < settings.COMPRA_MINIMA_UNIDADES:
-        raise PedidoError(
-            "La compra mínima es de "
-            f"{settings.COMPRA_MINIMA_UNIDADES} prendas en total."
-        )
 
     pedido = Pedido(
         usuario_id=usuario.id,
@@ -196,13 +194,28 @@ def _talle_historico(metadatos: list) -> str | None:
     return None
 
 
+def _nombre_cliente_historico(pedido) -> tuple[str, str]:
+    """Obtiene ambos campos aun cuando el pedido viejo no tenga billing."""
+    facturacion = pedido.facturacion or {}
+    envio = pedido.envio or {}
+    usuario = pedido.usuario
+    nombre = _valor(
+        facturacion, "first_name",
+        _valor(envio, "first_name", usuario.nombre if usuario else ""),
+    ).strip()
+    apellido = _valor(
+        facturacion, "last_name",
+        _valor(envio, "last_name", usuario.apellido if usuario else ""),
+    ).strip()
+    return nombre, apellido
+
+
 def _serializar_pedido_historico(pedido) -> dict:
     facturacion = pedido.facturacion or {}
     envio = pedido.envio or {}
     usuario = pedido.usuario
-    nombre = " ".join(filter(None, [facturacion.get("first_name"), facturacion.get("last_name")])).strip()
-    if not nombre and usuario:
-        nombre = f"{usuario.nombre} {usuario.apellido}".strip()
+    nombre, apellido = _nombre_cliente_historico(pedido)
+    nombre_completo = " ".join(filter(None, [nombre, apellido])).strip()
     direccion = _valor(envio, "address_1", _valor(facturacion, "address_1"))
     localidad = _valor(envio, "city", _valor(facturacion, "city"))
     provincia = _valor(envio, "state", _valor(facturacion, "state"))
@@ -219,14 +232,12 @@ def _serializar_pedido_historico(pedido) -> dict:
         "descuento_aplicado": max(item.subtotal - item.total, 0),
         "subtotal": item.total,
     } for item in pedido.items]
-    estados_iniciales = {
-        "pending": "pendiente", "on-hold": "contactado", "processing": "confirmado",
-        "completed": "confirmado", "cancelled": "cancelado", "refunded": "cancelado", "failed": "cancelado",
-    }
-    estado_gestion = pedido.estado_gestion or estados_iniciales.get(pedido.estado, "pendiente")
+    estado_gestion = estado_gestion_pedido_historico(pedido.estado, pedido.estado_gestion)
     return {
         "id": pedido.id, "codigo": f"WP-{pedido.numero}", "estado": estado_gestion,
-        "cliente_nombre": nombre or "Cliente histórico",
+        "cliente_nombre": nombre_completo or "Cliente histórico",
+        "cliente_primer_nombre": nombre or None,
+        "cliente_apellido": apellido or None,
         "cliente_telefono": _valor(facturacion, "phone", usuario.telefono if usuario else ""),
         "cliente_email": _valor(facturacion, "email", usuario.email if usuario else "") or None,
         "provincia": provincia, "localidad": localidad, "direccion": direccion,
@@ -242,7 +253,50 @@ def _serializar_pedido_historico(pedido) -> dict:
         "estado_sync_dux": "historico", "error_sync_dux": None, "sincronizado_dux_en": None,
         "items": items, "origen": "wordpress", "solo_lectura": False,
         "wordpress_id": pedido.wordpress_id, "estado_original": pedido.estado,
+        "estado_gestion": estado_gestion,
     }
+
+
+def get_mis_pedidos_service(db: Session, usuario_id: int, page: int, limit: int) -> dict:
+    referencias, total = get_referencias_pedidos_usuario(db, usuario_id, page, limit)
+    pedidos = get_pedidos_por_referencias(db, referencias)
+    items = [
+        _serializar_pedido_historico(pedido) if referencia[0] == "wordpress" else pedido
+        for referencia, pedido in zip(referencias, pedidos)
+    ]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_paginas": ceil(total / limit) if total else 0,
+    }
+
+
+def get_pedido_detalle_service(
+    db: Session,
+    referencia: str,
+    usuario_id: int,
+    origen: str | None = None,
+    puede_ver_todos: bool = False,
+):
+    origen_resuelto = origen or ("wordpress" if referencia.startswith("WP-") else "tienda")
+    usuario_scope = None if puede_ver_todos else usuario_id
+
+    if origen_resuelto == "wordpress":
+        if origen is not None and referencia.isdecimal():
+            pedido_historico = get_pedido_historico(db, int(referencia), usuario_scope)
+        else:
+            pedido_historico = get_pedido_historico_by_codigo(db, referencia, usuario_scope)
+        return _serializar_pedido_historico(pedido_historico) if pedido_historico else None
+
+    if origen is not None and referencia.isdecimal():
+        pedido = get_pedido(db, int(referencia))
+    else:
+        pedido = get_pedido_by_codigo(db, referencia)
+    if pedido is None or (usuario_scope is not None and pedido.usuario_id != usuario_scope):
+        return None
+    return pedido
 
 
 def get_pedidos_admin_service(

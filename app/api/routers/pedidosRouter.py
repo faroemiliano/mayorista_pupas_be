@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -6,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.core.security import require_admin, require_cliente
 from app.models.usuario import Usuario
-from app.repositories.pedido_repository import get_pedido_by_codigo
 from app.schemas.pedido_schemas import (
     PedidoCreateRequest,
     PedidoEstado,
@@ -25,8 +25,9 @@ from app.services.pedido_service import (
     PedidoError,
     actualizar_estado_pedido_service,
     crear_pedido_service,
+    get_mis_pedidos_service,
+    get_pedido_detalle_service,
     get_pedidos_admin_service,
-    get_pedidos_service,
 )
 
 
@@ -57,13 +58,24 @@ def listar_mis_pedidos(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(require_cliente),
 ):
-    return get_pedidos_service(db, None, page, limit, usuario_id=usuario.id)
+    return get_mis_pedidos_service(db, usuario.id, page, limit)
 
 
-@router.get("/{codigo}", response_model=PedidoResponse)
-def obtener_pedido(codigo: str, db: Session = Depends(get_db), usuario: Usuario = Depends(require_cliente)):
-    pedido = get_pedido_by_codigo(db, codigo)
-    if pedido is None or (usuario.rol != "admin" and pedido.usuario_id != usuario.id):
+@router.get("/{referencia}", response_model=PedidoResponse)
+def obtener_pedido(
+    referencia: str,
+    origen: Literal["tienda", "wordpress"] | None = Query(default=None),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_cliente),
+):
+    pedido = get_pedido_detalle_service(
+        db,
+        referencia,
+        usuario.id,
+        origen=origen,
+        puede_ver_todos=usuario.rol == "admin",
+    )
+    if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
     return pedido
 
@@ -92,9 +104,18 @@ def listar_pedidos_admin(
 
 
 @admin_router.get("/{pedido_id}", response_model=PedidoResponse)
-def obtener_pedido_admin(pedido_id: int, db: Session = Depends(get_db)):
-    from app.repositories.pedido_repository import get_pedido
-    pedido = get_pedido(db, pedido_id)
+def obtener_pedido_admin(
+    pedido_id: int,
+    origen: Literal["tienda", "wordpress"] = Query(default="tienda"),
+    db: Session = Depends(get_db),
+):
+    pedido = get_pedido_detalle_service(
+        db,
+        str(pedido_id),
+        usuario_id=0,
+        origen=origen,
+        puede_ver_todos=True,
+    )
     if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
     return pedido

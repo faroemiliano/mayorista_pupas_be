@@ -24,6 +24,12 @@ def _fecha(valor: str | None) -> datetime | None:
         return None
 
 
+def _debe_completar_nombre(usuario: Usuario) -> bool:
+    """No reemplaza un nombre que el cliente ya corrigió en esta tienda."""
+    nombre = (usuario.nombre or "").strip().casefold()
+    return not nombre or nombre == "cliente" or nombre == usuario.email.split("@", 1)[0].casefold()
+
+
 def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
     filas = list(db.scalars(
         select(MigracionWooCommerce)
@@ -44,6 +50,10 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
             resultado["procesados"] += 1
             continue
         wordpress_id = int(datos["id"])
+        nombre_wordpress = _texto(
+            datos.get("first_name"), facturacion.get("first_name"), datos.get("username"),
+        )
+        apellido_wordpress = _texto(datos.get("last_name"), facturacion.get("last_name"))
         repetido = email in emails_vistos
         if repetido:
             resultado["emails_repetidos"] += 1
@@ -58,8 +68,8 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
                 wordpress_id=wordpress_id,
                 origen="wordpress",
                 email=email,
-                nombre=_texto(datos.get("first_name"), facturacion.get("first_name"), datos.get("username")) or "Cliente",
-                apellido=_texto(datos.get("last_name"), facturacion.get("last_name")) or "",
+                nombre=nombre_wordpress or "Cliente",
+                apellido=apellido_wordpress or "",
                 rol="cliente",
                 activo=True,
                 estado_registro="aprobado",
@@ -81,6 +91,10 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
             # fueron importadas previamente con una contraseña temporal.
             if usuario.google_sub is None and usuario.rol != "admin":
                 usuario.requiere_migracion_password = True
+            if usuario.rol != "admin" and nombre_wordpress and _debe_completar_nombre(usuario):
+                usuario.nombre = nombre_wordpress
+            if usuario.rol != "admin" and apellido_wordpress and not (usuario.apellido or "").strip():
+                usuario.apellido = apellido_wordpress
 
         usuario.telefono = usuario.telefono or _texto(facturacion.get("phone"))
         usuario.provincia = usuario.provincia or _texto(facturacion.get("state"))

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.integrations.dux.client import DuxClient
+from app.integrations.woocommerce.urls import es_url_wordpress, url_desde_origen_wordpress
 from app.models.producto import Producto
 from app.models.imagen_producto import ImagenProducto
 
@@ -49,9 +50,8 @@ def _talles_catalogo(producto: Producto, reservas_talle: dict) -> list[dict]:
 
 def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
     parsed = urlsplit(url)
-    wordpress_host = urlsplit(settings.WOOCOMMERCE_URL).hostname
     cloud_name = urlsplit(settings.CLOUDINARY_URL).hostname if settings.CLOUDINARY_URL else None
-    es_imagen_wordpress = parsed.scheme == "https" and parsed.hostname == wordpress_host
+    es_imagen_wordpress = es_url_wordpress(url)
     es_imagen_cloudinary = (
         parsed.scheme == "https"
         and parsed.hostname == "res.cloudinary.com"
@@ -59,7 +59,10 @@ def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
         and parsed.path.startswith(f"/{cloud_name}/")
     )
     if es_imagen_wordpress or es_imagen_cloudinary:
-        response = httpx.get(url, timeout=30.0)
+        response = httpx.get(
+            url_desde_origen_wordpress(url) if es_imagen_wordpress else url,
+            timeout=30.0,
+        )
         response.raise_for_status()
         contenido = response.content
         if len(contenido) > 15 * 1024 * 1024:

@@ -52,6 +52,8 @@ class PedidoResponse(BaseModel):
     codigo: str
     estado: str
     cliente_nombre: str
+    cliente_primer_nombre: str | None = None
+    cliente_apellido: str | None = None
     cliente_telefono: str
     cliente_email: str | None
     provincia: str
@@ -77,6 +79,7 @@ class PedidoResponse(BaseModel):
     solo_lectura: bool = False
     wordpress_id: int | None = None
     estado_original: str | None = None
+    estado_gestion: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

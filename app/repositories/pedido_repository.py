@@ -8,6 +8,40 @@ from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress
 from app.models.usuario import Usuario
 
 
+ESTADO_GESTION_POR_ESTADO_WOOCOMMERCE = {
+    "pending": "pendiente",
+    "on-hold": "pendiente",
+    "processing": "confirmado",
+    "completed": "confirmado",
+    "cancelled": "cancelado",
+    "refunded": "cancelado",
+    "failed": "cancelado",
+}
+ESTADOS_GESTION_PEDIDO = {"pendiente", "contactado", "confirmado", "cancelado"}
+
+
+def estado_gestion_pedido_historico(estado_original: str, estado_gestion: str | None) -> str:
+    return estado_gestion or ESTADO_GESTION_POR_ESTADO_WOOCOMMERCE.get(estado_original, "pendiente")
+
+
+def _filtro_estado_historico(estado: str):
+    estados_originales = tuple(
+        original
+        for original, gestion in ESTADO_GESTION_POR_ESTADO_WOOCOMMERCE.items()
+        if gestion == estado
+    )
+    if not estados_originales and estado not in ESTADOS_GESTION_PEDIDO:
+        estados_originales = (estado,)
+
+    condiciones = [PedidoHistoricoWordpress.estado_gestion == estado]
+    if estados_originales:
+        condiciones.append(and_(
+            PedidoHistoricoWordpress.estado_gestion.is_(None),
+            PedidoHistoricoWordpress.estado.in_(estados_originales),
+        ))
+    return or_(*condiciones)
+
+
 def get_pedido_by_codigo(db: Session, codigo: str) -> Pedido | None:
     return db.scalar(
         select(Pedido)
@@ -22,6 +56,47 @@ def get_pedido(db: Session, pedido_id: int) -> Pedido | None:
         .options(selectinload(Pedido.items))
         .where(Pedido.id == pedido_id)
     )
+
+
+def get_pedido_historico(
+    db: Session,
+    pedido_id: int,
+    usuario_id: int | None = None,
+) -> PedidoHistoricoWordpress | None:
+    query = (
+        select(PedidoHistoricoWordpress)
+        .options(
+            selectinload(PedidoHistoricoWordpress.items),
+            selectinload(PedidoHistoricoWordpress.usuario),
+        )
+        .where(PedidoHistoricoWordpress.id == pedido_id)
+    )
+    if usuario_id is not None:
+        query = query.where(PedidoHistoricoWordpress.usuario_id == usuario_id)
+    return db.scalar(query)
+
+
+def get_pedido_historico_by_codigo(
+    db: Session,
+    codigo: str,
+    usuario_id: int | None = None,
+) -> PedidoHistoricoWordpress | None:
+    if not codigo.startswith("WP-"):
+        return None
+    numero = codigo.removeprefix("WP-")
+    query = (
+        select(PedidoHistoricoWordpress)
+        .options(
+            selectinload(PedidoHistoricoWordpress.items),
+            selectinload(PedidoHistoricoWordpress.usuario),
+        )
+        .where(PedidoHistoricoWordpress.numero == numero)
+        .limit(2)
+    )
+    if usuario_id is not None:
+        query = query.where(PedidoHistoricoWordpress.usuario_id == usuario_id)
+    coincidencias = list(db.scalars(query).all())
+    return coincidencias[0] if len(coincidencias) == 1 else None
 
 
 def get_pedidos(
@@ -118,15 +193,7 @@ def get_referencias_pedidos_admin(
             PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
         ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id)
         if estado:
-            originales = {
-                "pendiente": ("pending",), "contactado": ("on-hold",),
-                "confirmado": ("processing", "completed"),
-                "cancelado": ("cancelled", "refunded", "failed"),
-            }.get(estado, (estado,))
-            wordpress = wordpress.where(or_(
-                PedidoHistoricoWordpress.estado_gestion == estado,
-                and_(PedidoHistoricoWordpress.estado_gestion.is_(None), PedidoHistoricoWordpress.estado.in_(originales)),
-            ))
+            wordpress = wordpress.where(_filtro_estado_historico(estado))
         if buscar and (termino := buscar.strip()):
             patron = f"%{termino}%"
             wordpress = wordpress.where(or_(
@@ -146,6 +213,34 @@ def get_referencias_pedidos_admin(
     filas = db.execute(
         select(combinada.c.origen, combinada.c.id)
         .order_by(combinada.c.fecha.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    ).all()
+    return [(fila.origen, fila.id) for fila in filas], total
+
+
+def get_referencias_pedidos_usuario(
+    db: Session,
+    usuario_id: int,
+    page: int,
+    limit: int,
+) -> tuple[list[tuple[str, int]], int]:
+    tienda = select(
+        literal("tienda").label("origen"),
+        Pedido.id.label("id"),
+        Pedido.creado_en.label("fecha"),
+    ).where(Pedido.usuario_id == usuario_id)
+    wordpress = select(
+        literal("wordpress").label("origen"),
+        PedidoHistoricoWordpress.id.label("id"),
+        PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
+    ).where(PedidoHistoricoWordpress.usuario_id == usuario_id)
+
+    combinada = union_all(tienda, wordpress).subquery()
+    total = db.scalar(select(func.count()).select_from(combinada)) or 0
+    filas = db.execute(
+        select(combinada.c.origen, combinada.c.id)
+        .order_by(combinada.c.fecha.desc(), combinada.c.origen.asc(), combinada.c.id.desc())
         .offset((page - 1) * limit)
         .limit(limit)
     ).all()

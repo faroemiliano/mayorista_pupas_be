@@ -4,6 +4,7 @@ from app.models.producto import Producto
 from app.models.usuario import Usuario
 from app.models.usuario_wordpress import UsuarioWordpress
 from app.services.conversion_pedidos_wordpress_service import convertir_pedidos_wordpress
+from app.services.pedido_service import get_pedidos_admin_service
 
 
 def test_convierte_pedido_historico_sin_generar_pedido_operativo(db):
@@ -27,3 +28,8 @@ def test_convierte_pedido_historico_sin_generar_pedido_operativo(db):
     assert pedido.usuario_id == usuario.id
     assert pedido.items[0].producto_id == producto.id
     assert db.execute(__import__('sqlalchemy').text("select count(*) from pedidos")).scalar_one() == 0
+
+    listado = get_pedidos_admin_service(db, None, 1, 20, origen="wordpress")
+    assert listado["items"][0]["cliente_nombre"] == "Ana"
+    assert listado["items"][0]["cliente_primer_nombre"] == "Ana"
+    assert listado["items"][0]["cliente_apellido"] is None

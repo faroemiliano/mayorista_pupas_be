@@ -98,7 +98,7 @@ def test_pedido_confirmado_programa_envio_automatico_a_dux(client: TestClient, d
     assert pedidos_enviados == [response.json()["id"]]
 
 
-def test_pedido_rechaza_compra_inferior_al_minimo(
+def test_pedido_permite_compra_por_unidad(
     client: TestClient,
     db: Session,
 ):
@@ -107,11 +107,11 @@ def test_pedido_rechaza_compra_inferior_al_minimo(
 
     response = client.post(
         "/api/pedidos/",
-        json=pedido_payload(producto.id, cantidad=5),
+        json=pedido_payload(producto.id, cantidad=1),
     )
 
-    assert response.status_code == 400
-    assert "compra mínima" in response.json()["detail"]
+    assert response.status_code == 201, response.text
+    assert response.json()["cantidad_unidades"] == 1
 
 
 def test_pedido_permite_seis_prendas_sin_minimo_monetario(
@@ -246,6 +246,31 @@ def test_crear_pedido_reserva_stock_y_evitar_sobreventa(
     )
     assert segundo.status_code == 400
     assert "20" in segundo.json()["detail"]
+
+
+def test_pedido_rechaza_suma_de_talles_superior_al_stock_total(
+    client: TestClient,
+    db: Session,
+):
+    from app.models.stock_talle_producto import StockTalleProducto
+
+    producto = crear_producto(db, 2)
+    producto.stocks[0].stock_real = 5
+    producto.stocks[0].stock_disponible = 5
+    producto.stocks_talles[0].cantidad = 5
+    producto.stocks_talles.append(StockTalleProducto(talle="2", cantidad=5))
+    db.commit()
+    payload = pedido_payload(producto.id, cantidad=3)
+    payload["items"] = [
+        {"producto_id": producto.id, "talle": "1", "cantidad": 3},
+        {"producto_id": producto.id, "talle": "2", "cantidad": 3},
+    ]
+
+    response = client.post("/api/pedidos/", json=payload)
+
+    assert response.status_code == 400
+    assert "5.00 unidades disponibles" in response.json()["detail"]
+    assert db.scalar(select(Pedido.id)) is None
 
 
 def test_cancelar_pedido_libera_reserva_local(

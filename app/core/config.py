@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,6 +37,9 @@ class Settings(BaseSettings):
     EMAIL_ADMIN: str = ""
     WHATSAPP_EMPRESA: str = ""
     WOOCOMMERCE_URL: str = ""
+    # Host técnico del WordPress anterior. Permite seguir leyendo la API y
+    # descargar medios aunque el dominio comercial ya apunte a Vercel.
+    WORDPRESS_ORIGIN_URL: str = ""
     WOOCOMMERCE_CONSUMER_KEY: str = ""
     WOOCOMMERCE_CONSUMER_SECRET: str = ""
     FRONTEND_URL: str = "http://localhost:5173"
@@ -59,16 +60,16 @@ class Settings(BaseSettings):
     @property
     def dux_personales_pedidos(self) -> list[int]:
         return [int(value.strip()) for value in self.DUX_PERSONALES_PEDIDOS.split(",") if value.strip()]
+
+    @property
+    def wordpress_source_url(self) -> str:
+        return (self.WORDPRESS_ORIGIN_URL or self.WOOCOMMERCE_URL).rstrip("/")
     GOOGLE_CLIENT_ID: str = ""
     AUTH_SECRET_KEY: str = "cambiar-esta-clave-en-produccion-pupas-2026"
     AUTH_TOKEN_MINUTES: int = 10080
 
     DUX_LISTA_PRECIO_MAYORISTA_ID: int = 4710
     DUX_LISTA_PRECIO_24_ID: int = 43406
-    # Compatibilidad con instalaciones que todavía conservan esta variable.
-    # La condición de compra ya no utiliza el importe monetario.
-    COMPRA_MINIMA: Decimal = Decimal("100000.00")
-    COMPRA_MINIMA_UNIDADES: int = 6
     CARRITO_RESERVA_MINUTOS: int = 30
 
     CORS_ORIGINS: str = (

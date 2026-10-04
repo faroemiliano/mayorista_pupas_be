@@ -148,7 +148,7 @@ def completar_migracion_password(data:CompletarMigracionPasswordRequest,db:Sessi
     if not settings.WORDPRESS_MIGRATION_SECRET:
         raise HTTPException(status_code=503,detail="La validación de cuentas migradas no está configurada.")
     try:
-        response=httpx.post(f"{settings.WOOCOMMERCE_URL.rstrip('/')}/wp-json/pupas-migration/v1/verify",headers={"X-Pupas-Migration-Secret":settings.WORDPRESS_MIGRATION_SECRET},json={"email":usuario.email,"password":data.password_anterior},timeout=15)
+        response=httpx.post(f"{settings.wordpress_source_url}/wp-json/pupas-migration/v1/verify",headers={"X-Pupas-Migration-Secret":settings.WORDPRESS_MIGRATION_SECRET},json={"email":usuario.email,"password":data.password_anterior},timeout=15)
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502,detail="No se pudo validar la cuenta anterior.") from error
     if response.status_code != 200:

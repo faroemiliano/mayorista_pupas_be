@@ -97,9 +97,6 @@ def test_carrito_usa_precio_mayorista_antes_de_24(
         "cantidad_productos_diferentes"
     ] == 1
     assert carrito["cantidad_unidades"] == 3
-    assert carrito["compra_minima_unidades"] == 6
-    assert carrito["faltantes_para_compra_minima"] == 3
-    assert carrito["cumple_compra_minima"] is False
     assert carrito[
         "aplica_precio_24_productos"
     ] is False
@@ -335,7 +332,6 @@ def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, 
     data = response.json()
     assert data["cantidad_productos_diferentes"] == 1
     assert data["cantidad_unidades"] == 6
-    assert data["cumple_compra_minima"] is True
     assert {(item["talle"], item["cantidad"]) for item in data["items"]} == {("1", 2), ("2", 4)}
 
     assert client.post(
@@ -349,3 +345,46 @@ def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, 
             ]
         },
     ).status_code == 422
+
+
+def test_carrito_rechaza_suma_de_talles_superior_al_stock_total(
+    client: TestClient,
+    db: Session,
+):
+    producto = crear_producto(db, 9)
+    producto.stocks[0].stock_real = 5
+    producto.stocks[0].stock_disponible = 5
+    producto.stocks_talles[0].cantidad = 5
+    producto.stocks_talles.append(StockTalleProducto(talle="2", cantidad=5))
+    db.commit()
+
+    response = client.post("/api/carrito/calcular", json={"items": [
+        {"producto_id": producto.id, "talle": "1", "cantidad": 3},
+        {"producto_id": producto.id, "talle": "2", "cantidad": 3},
+    ]})
+
+    assert response.status_code == 400
+    assert "5.00 unidades disponibles" in response.json()["detail"]
+
+
+def test_reserva_rechaza_suma_de_talles_superior_al_stock_total(
+    client: TestClient,
+    db: Session,
+):
+    producto = crear_producto(db, 10)
+    producto.stocks[0].stock_real = 5
+    producto.stocks[0].stock_disponible = 5
+    producto.stocks_talles[0].cantidad = 5
+    producto.stocks_talles.append(StockTalleProducto(talle="2", cantidad=5))
+    db.commit()
+
+    response = client.put("/api/carrito/reserva", json={"items": [
+        {"producto_id": producto.id, "talle": "1", "cantidad": 3},
+        {"producto_id": producto.id, "talle": "2", "cantidad": 3},
+    ]})
+
+    assert response.status_code == 409
+    assert "5.00 unidades disponibles" in response.json()["detail"]
+    assert db.scalar(
+        select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)
+    ) is None

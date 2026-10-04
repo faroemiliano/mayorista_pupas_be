@@ -53,6 +53,3 @@ class CarritoCalcularResponse(BaseModel):
     subtotal_sin_descuento: Decimal
     descuento_aplicado: Decimal
     total: Decimal
-    compra_minima_unidades: int
-    faltantes_para_compra_minima: int
-    cumple_compra_minima: bool

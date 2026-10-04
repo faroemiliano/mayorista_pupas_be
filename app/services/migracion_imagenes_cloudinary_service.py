@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.database.session import SessionLocal
 from app.models.imagen_producto import ImagenProducto
 from app.models.migracion_woocommerce import MigracionWooCommerce
+from app.integrations.woocommerce.urls import es_url_wordpress, url_desde_origen_wordpress
 from app.services.migracion_woocommerce_service import _guardar
 
 
@@ -52,8 +53,7 @@ def _configurar_cloudinary() -> None:
 
 def _es_imagen_wordpress(url: str) -> bool:
     parsed = urlsplit(url)
-    host_wordpress = urlsplit(settings.WOOCOMMERCE_URL).hostname
-    return parsed.scheme == "https" and parsed.hostname == host_wordpress and "/wp-content/uploads/" in parsed.path
+    return es_url_wordpress(url) and "/wp-content/uploads/" in parsed.path
 
 
 def _imagenes_pendientes(db: Session) -> list[ImagenProducto]:
@@ -65,7 +65,7 @@ def _imagenes_pendientes(db: Session) -> list[ImagenProducto]:
 
 def _subir_imagen(imagen: ImagenProducto) -> str:
     respuesta = cloudinary.uploader.upload(
-        imagen.url,
+        url_desde_origen_wordpress(imagen.url),
         public_id=f"pupas/wordpress/productos/{imagen.producto_id}/imagenes/{imagen.id}",
         resource_type="image",
         overwrite=True,

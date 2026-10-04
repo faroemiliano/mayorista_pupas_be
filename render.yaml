@@ -29,6 +29,8 @@ services:
         value: pupaokk@gmail.com
       - key: WOOCOMMERCE_URL
         value: https://pupasmayorista.com.ar
+      - key: WORDPRESS_ORIGIN_URL
+        value: https://pupas.wnpower.host
       - key: WOOCOMMERCE_CONSUMER_KEY
         sync: false
       - key: WOOCOMMERCE_CONSUMER_SECRET
@@ -61,8 +63,6 @@ services:
         value: "4710"
       - key: DUX_LISTA_PRECIO_24_ID
         value: "43406"
-      - key: COMPRA_MINIMA_UNIDADES
-        value: "6"
 
 databases:
   - name: pupas-mayorista-db
