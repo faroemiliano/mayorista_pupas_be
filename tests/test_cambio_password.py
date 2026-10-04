@@ -78,6 +78,51 @@ def test_solicitud_reset_envia_email_html_con_logo(engine, monkeypatch):
         app.dependency_overrides.clear()
 
 
+def test_cuenta_migrada_recibe_enlace_automaticamente_al_reconocer_email(engine, monkeypatch):
+    with Session(engine) as db:
+        db.add(Usuario(
+            email="migrada-automatica@test.local",
+            nombre="Cliente Pupas",
+            password_hash=None,
+            rol="cliente",
+            activo=True,
+            estado_registro="aprobado",
+            origen="wordpress",
+            wordpress_id=457,
+            requiere_migracion_password=True,
+        ))
+        db.commit()
+
+    enviados = []
+
+    class RespuestaExitosa:
+        def raise_for_status(self):
+            return None
+
+    def enviar(*args, **kwargs):
+        enviados.append((args, kwargs))
+        return RespuestaExitosa()
+
+    monkeypatch.setattr("app.api.routers.authRouter.settings.RESEND_API_KEY", "resend-test")
+    monkeypatch.setattr("app.api.routers.authRouter.httpx.post", enviar)
+
+    def override_get_db():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/auth/estado-email", json={"email": "migrada-automatica@test.local"})
+            repetida = client.post("/api/auth/estado-email", json={"email": "migrada-automatica@test.local"})
+        assert response.status_code == 200
+        assert response.json() == {"requiere_migracion": True}
+        assert repetida.status_code == 200
+        assert len(enviados) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_usuario_cambia_su_password(engine):
     with Session(engine) as db:
         usuario = Usuario(

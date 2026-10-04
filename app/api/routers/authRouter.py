@@ -17,6 +17,7 @@ from app.services.password_reset_email_service import construir_email_restableci
 
 router=APIRouter(prefix="/api/auth",tags=["Autenticación"])
 RESET_RESPONSE={"mensaje":"Si el email corresponde a una cuenta, recibirás un enlace para cambiar la contraseña."}
+REENVIO_RESET_MINUTOS = 2
 
 def _es_cuenta_wordpress(usuario: Usuario | None, db: Session | None = None) -> bool:
     return bool(usuario and usuario.activo and usuario.requiere_migracion_password)
@@ -28,26 +29,43 @@ def _fecha_en_utc(fecha: datetime) -> datetime:
         return fecha.replace(tzinfo=timezone.utc)
     return fecha.astimezone(timezone.utc)
 
+
+def _enviar_enlace_restablecimiento(usuario: Usuario, db: Session, *, forzar: bool = False) -> bool:
+    """Genera y envía un enlace, evitando duplicados por eventos del formulario."""
+    ahora = datetime.now(timezone.utc)
+    expira = usuario.reset_password_expira_en
+    enlace_reciente = (
+        usuario.reset_password_token_hash is not None
+        and expira is not None
+        and _fecha_en_utc(expira) > ahora + timedelta(hours=1, minutes=-REENVIO_RESET_MINUTOS)
+    )
+    if enlace_reciente and not forzar:
+        return False
+
+    token = secrets.token_urlsafe(48)
+    usuario.reset_password_token_hash = hashlib.sha256(token.encode()).hexdigest()
+    usuario.reset_password_expira_en = ahora + timedelta(hours=1)
+    if not settings.RESEND_API_KEY:
+        raise HTTPException(status_code=503, detail="El envío de emails no está configurado.")
+    enlace = f"{settings.FRONTEND_URL.rstrip('/')}/restablecer-clave?token={token}"
+    texto_email, html_email = construir_email_restablecimiento(
+        nombre=usuario.nombre,
+        enlace=enlace,
+        logo_url=f"{settings.FRONTEND_URL.rstrip('/')}/brand/logo-pupas.jpg",
+    )
+    try:
+        httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":texto_email,"html":html_email},timeout=15).raise_for_status()
+    except httpx.HTTPError as error:
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Resend rechazó el envío del email. Verificá EMAIL_FROM y el dominio en Resend.") from error
+    db.commit()
+    return True
+
 @router.post("/solicitar-reset-password")
 def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depends(get_db)):
     usuario=get_usuario_by_email(db,data.email.strip().lower())
     if usuario and usuario.activo:
-        token=secrets.token_urlsafe(48)
-        usuario.reset_password_token_hash=hashlib.sha256(token.encode()).hexdigest()
-        usuario.reset_password_expira_en=datetime.now(timezone.utc)+timedelta(hours=1)
-        db.commit()
-        if not settings.RESEND_API_KEY:
-            raise HTTPException(status_code=503, detail="El envío de emails no está configurado.")
-        enlace=f"{settings.FRONTEND_URL.rstrip('/')}/restablecer-clave?token={token}"
-        texto_email, html_email = construir_email_restablecimiento(
-            nombre=usuario.nombre,
-            enlace=enlace,
-            logo_url=f"{settings.FRONTEND_URL.rstrip('/')}/brand/logo-pupas.jpg",
-        )
-        try:
-            httpx.post("https://api.resend.com/emails",headers={"Authorization":f"Bearer {settings.RESEND_API_KEY}"},json={"from":settings.EMAIL_FROM,"to":[usuario.email],"subject":"Creá tu nueva contraseña de Pupas","text":texto_email,"html":html_email},timeout=15).raise_for_status()
-        except httpx.HTTPError as error:
-            raise HTTPException(status_code=502, detail="Resend rechazó el envío del email. Verificá EMAIL_FROM y el dominio en Resend.") from error
+        _enviar_enlace_restablecimiento(usuario, db, forzar=True)
     return RESET_RESPONSE
 
 @router.post("/restablecer-password")
@@ -117,7 +135,10 @@ def login(data:LoginRequest,db:Session=Depends(get_db)):
 @router.post("/estado-email", response_model=EstadoEmailResponse)
 def estado_email(data: SolicitarResetPasswordRequest, db: Session = Depends(get_db)):
     usuario = get_usuario_by_email(db, data.email.strip().lower())
-    return {"requiere_migracion": _es_cuenta_wordpress(usuario, db)}
+    requiere_migracion = _es_cuenta_wordpress(usuario, db)
+    if requiere_migracion:
+        _enviar_enlace_restablecimiento(usuario, db)
+    return {"requiere_migracion": requiere_migracion}
 
 @router.post("/completar-migracion-password",response_model=AuthResponse)
 def completar_migracion_password(data:CompletarMigracionPasswordRequest,db:Session=Depends(get_db)):
