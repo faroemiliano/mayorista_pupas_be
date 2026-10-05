@@ -14,6 +14,7 @@ from app.services.stock_fuente_service import filtro_stock_fuente_activa
 def get_analitica_productos(
     db: Session,
     desde: datetime | None,
+    hasta: datetime | None = None,
 ) -> list[dict]:
     ventas_tienda = (
         select(
@@ -28,6 +29,8 @@ def get_analitica_productos(
     )
     if desde is not None:
         ventas_tienda = ventas_tienda.where(Pedido.creado_en >= desde)
+    if hasta is not None:
+        ventas_tienda = ventas_tienda.where(Pedido.creado_en < hasta)
 
     ventas_wordpress = (
         select(
@@ -42,6 +45,8 @@ def get_analitica_productos(
     )
     if desde is not None:
         ventas_wordpress = ventas_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        ventas_wordpress = ventas_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
 
     ventas_union = union_all(ventas_tienda, ventas_wordpress).subquery()
     ventas = (
@@ -85,6 +90,7 @@ def get_analitica_productos(
 def get_ventas_temporales(
     db: Session,
     desde: datetime | None,
+    hasta: datetime | None = None,
 ) -> list[dict]:
     query_tienda = (
         select(
@@ -96,6 +102,8 @@ def get_ventas_temporales(
     )
     if desde is not None:
         query_tienda = query_tienda.where(Pedido.creado_en >= desde)
+    if hasta is not None:
+        query_tienda = query_tienda.where(Pedido.creado_en < hasta)
 
     unidades_historicas = (
         select(
@@ -116,6 +124,8 @@ def get_ventas_temporales(
     )
     if desde is not None:
         query_wordpress = query_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        query_wordpress = query_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
     ventas = union_all(query_tienda, query_wordpress).subquery()
     query = select(ventas.c.creado_en, ventas.c.total, ventas.c.cantidad_unidades).order_by(ventas.c.creado_en)
     return [dict(row) for row in db.execute(query).mappings().all()]

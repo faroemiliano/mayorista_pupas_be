@@ -130,6 +130,37 @@ def test_analitica_incluye_historial_wordpress(client, db):
     assert sum(punto["unidades"] for punto in data["serie_ventas"]) == 3
 
 
+def test_analitica_permite_elegir_rango_y_compara_periodo_anterior(client, db):
+    producto = crear_producto(db, 31)
+    anterior = PedidoHistoricoWordpress(
+        wordpress_id=9101, numero="9101", wordpress_customer_id=0, estado="completed",
+        total=Decimal("2000"), creado_en_wordpress=datetime(2024, 1, 15, tzinfo=timezone.utc),
+    )
+    anterior.items.append(PedidoItemHistoricoWordpress(
+        wordpress_id=9201, wordpress_product_id=123, producto_id=producto.id, nombre=producto.nombre,
+        cantidad=1, subtotal=Decimal("2000"), total=Decimal("2000"), impuesto_total=0,
+        precio_unitario=Decimal("2000"),
+    ))
+    seleccionado = PedidoHistoricoWordpress(
+        wordpress_id=9102, numero="9102", wordpress_customer_id=0, estado="completed",
+        total=Decimal("6000"), creado_en_wordpress=datetime(2024, 2, 15, tzinfo=timezone.utc),
+    )
+    seleccionado.items.append(PedidoItemHistoricoWordpress(
+        wordpress_id=9202, wordpress_product_id=123, producto_id=producto.id, nombre=producto.nombre,
+        cantidad=3, subtotal=Decimal("6000"), total=Decimal("6000"), impuesto_total=0,
+        precio_unitario=Decimal("2000"),
+    ))
+    db.add_all([anterior, seleccionado])
+    db.commit()
+
+    data = client.get(
+        "/api/admin/productos/analitica?fecha_desde=2024-02-01&fecha_hasta=2024-02-29&agrupacion=mes"
+    ).json()
+    assert data["resumen"]["unidades_vendidas"] == 3
+    assert data["comparacion_anterior"]["resumen"]["unidades"] == 1
+    assert data["comparacion_anterior"]["resumen"]["importe"] == "2000.00"
+
+
 def test_admin_puede_ocultar_producto_solo_en_la_tienda(client, db):
     producto = crear_producto(db, 4)
     response = client.patch(

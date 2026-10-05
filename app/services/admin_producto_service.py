@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ def _etiqueta_intervalo(fecha: datetime, agrupacion: str) -> str:
 
 
 def _crear_serie_ventas(db: Session, desde: datetime | None, hasta: datetime, agrupacion: str) -> list[dict]:
-    ventas = get_ventas_temporales(db, desde)
+    ventas = get_ventas_temporales(db, desde, hasta + timedelta(microseconds=1))
     inicio = _inicio_intervalo(desde or (ventas[0]["creado_en"] if ventas else hasta), agrupacion)
     fin = _inicio_intervalo(hasta, agrupacion)
     puntos: dict[datetime, dict] = {}
@@ -76,15 +76,31 @@ def _crear_serie_ventas(db: Session, desde: datetime | None, hasta: datetime, ag
     return resultado
 
 
+def _resumen_ventas(ventas: list[dict]) -> dict:
+    return {
+        "pedidos": len(ventas),
+        "unidades": sum(int(item["cantidad_unidades"]) for item in ventas),
+        "importe": sum((Decimal(item["total"]) for item in ventas), Decimal("0")),
+    }
+
+
 def get_analitica_productos_service(
     db: Session,
     dias: int | None,
     limit: int,
     agrupacion: str = "dia",
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
 ) -> dict:
-    hasta = datetime.now(timezone.utc)
-    desde = hasta - timedelta(days=dias) if dias is not None else None
-    productos = get_analitica_productos(db, desde)
+    if fecha_desde is not None and fecha_hasta is not None:
+        desde = datetime.combine(fecha_desde, time.min, timezone.utc)
+        hasta_exclusivo = datetime.combine(fecha_hasta + timedelta(days=1), time.min, timezone.utc)
+        hasta = hasta_exclusivo - timedelta(microseconds=1)
+    else:
+        hasta = datetime.now(timezone.utc)
+        hasta_exclusivo = hasta + timedelta(microseconds=1)
+        desde = hasta - timedelta(days=dias) if dias is not None else None
+    productos = get_analitica_productos(db, desde, hasta_exclusivo)
     con_ventas = [item for item in productos if item["unidades_vendidas"] > 0]
     sin_ventas = [item for item in productos if item["unidades_vendidas"] == 0]
 
@@ -97,11 +113,23 @@ def get_analitica_productos_service(
         key=lambda item: (item["unidades_vendidas"], item["importe_vendido"], item["nombre"]),
     )[:limit]
     sin_ventas = sorted(sin_ventas, key=lambda item: item["nombre"])[:limit]
+    comparacion_anterior = None
+    if desde is not None:
+        duracion = hasta_exclusivo - desde
+        anterior_desde = desde - duracion
+        anterior_hasta = desde
+        comparacion_anterior = {
+            "desde": anterior_desde,
+            "hasta": anterior_hasta - timedelta(microseconds=1),
+            "resumen": _resumen_ventas(
+                get_ventas_temporales(db, anterior_desde, anterior_hasta)
+            ),
+        }
 
     return {
         "origen": "pedidos_tienda",
         "alcance": "Incluye el historial migrado de WordPress y los pedidos nuevos de esta tienda, excepto los cancelados. No incluye ventas externas registradas solamente en Dux.",
-        "dias": dias,
+        "dias": None if fecha_desde is not None else dias,
         "desde": desde,
         "hasta": hasta,
         "resumen": {
@@ -115,4 +143,5 @@ def get_analitica_productos_service(
         "mas_vendidos": mas_vendidos,
         "menos_vendidos": menos_vendidos,
         "sin_ventas": sin_ventas,
+        "comparacion_anterior": comparacion_anterior,
     }

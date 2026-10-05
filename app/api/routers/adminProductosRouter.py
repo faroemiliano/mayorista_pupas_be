@@ -1,5 +1,6 @@
 import base64
 import binascii
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -259,6 +260,14 @@ def obtener_analitica_productos(
     dias: int = Query(default=30, ge=0, le=3650),
     limit: int = Query(default=10, ge=1, le=50),
     agrupacion: str = Query(default="dia", pattern="^(dia|semana|mes|anio)$"),
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
 ):
-    return get_analitica_productos_service(db, None if dias == 0 else dias, limit, agrupacion)
+    if (fecha_desde is None) != (fecha_hasta is None):
+        raise HTTPException(422, "Indicá ambas fechas para comparar un período.")
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(422, "La fecha inicial no puede ser posterior a la final.")
+    return get_analitica_productos_service(
+        db, None if dias == 0 else dias, limit, agrupacion, fecha_desde, fecha_hasta,
+    )
