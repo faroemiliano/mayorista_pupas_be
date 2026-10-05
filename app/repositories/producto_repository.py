@@ -178,6 +178,7 @@ def get_productos(
     marca_id: int | None = None,
     solo_habilitados: bool = True,
     con_stock: bool | None = None,
+    solo_destacados: bool = False,
     page: int = 1,
     limit: int = 20,
     orden: str = "nombre_asc",
@@ -240,6 +241,10 @@ def get_productos(
                 filtro
             )
         )
+
+    if solo_destacados:
+        query = query.where(Producto.destacado.is_(True))
+        count_query = count_query.where(Producto.destacado.is_(True))
 
     # =====================================================
     # CATEGORÍA
@@ -398,7 +403,9 @@ def get_productos(
     # ORDEN
     # =====================================================
 
-    if orden == "nombre_desc":
+    if solo_destacados:
+        query = query.order_by(Producto.orden_destacado.asc().nulls_last(), Producto.id.desc())
+    elif orden == "nombre_desc":
 
         query = query.order_by(
             Producto.nombre.desc(),

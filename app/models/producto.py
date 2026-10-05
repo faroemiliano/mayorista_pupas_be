@@ -108,6 +108,12 @@ class Producto(Base):
         Boolean, nullable=False, default=True, server_default="true",
     )
 
+    destacado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True,
+    )
+
+    orden_destacado: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     fecha_creacion_dux: Mapped[date | None] = mapped_column(
         Date,
         nullable=True,

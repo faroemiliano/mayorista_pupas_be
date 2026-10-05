@@ -63,6 +63,8 @@ def listar_productos(
 
     con_stock: bool | None = None,
 
+    solo_destacados: bool = False,
+
     page: int = Query(
         default=1,
         ge=1,
@@ -80,7 +82,7 @@ def listar_productos(
     usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
 
-    if not solo_habilitados and (usuario is None or usuario.rol != "admin"):
+    if not solo_habilitados and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sólo un administrador puede ver productos ocultos.")
 
     return get_productos_service(
@@ -91,6 +93,7 @@ def listar_productos(
         marca_id=marca_id,
         solo_habilitados=solo_habilitados,
         con_stock=con_stock,
+        solo_destacados=solo_destacados,
         page=page,
         limit=limit,
         orden=orden,
@@ -215,7 +218,7 @@ def obtener_producto_por_slug(
             detail="Producto no encontrado.",
         )
 
-    if not producto.visible_tienda and (usuario is None or usuario.rol != "admin"):
+    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto
@@ -246,7 +249,7 @@ def obtener_producto(
             detail="Producto no encontrado.",
         )
 
-    if not producto.visible_tienda and (usuario is None or usuario.rol != "admin"):
+    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto

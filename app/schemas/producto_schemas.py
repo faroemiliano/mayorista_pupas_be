@@ -138,6 +138,8 @@ class ProductoBaseResponse(BaseModel):
 
     habilitado: bool
     visible_tienda: bool
+    destacado: bool
+    orden_destacado: int | None
 
     fecha_creacion_dux: date | None
 

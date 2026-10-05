@@ -33,6 +33,14 @@ class VisibilidadProductoResponse(BaseModel):
     id: int
     visible_tienda: bool
 
+class DestacadoProductoRequest(BaseModel):
+    destacado: bool
+
+class DestacadoProductoResponse(BaseModel):
+    id: int
+    destacado: bool
+    orden_destacado: int | None
+
 class CantidadTalleRequest(BaseModel):
     talle: str = Field(min_length=1, max_length=30)
     cantidad: int = Field(ge=0)
@@ -228,6 +236,26 @@ def cambiar_visibilidad(producto_id:int,data:VisibilidadProductoRequest,db:Sessi
     producto=db.get(Producto,producto_id)
     if producto is None:raise HTTPException(status_code=404,detail="Producto no encontrado.")
     producto.visible_tienda=data.visible;db.commit();db.refresh(producto)
+    return producto
+
+@router.patch("/{producto_id}/destacado", response_model=DestacadoProductoResponse)
+def cambiar_destacado(producto_id: int, data: DestacadoProductoRequest, db: Session = Depends(get_db)):
+    producto = db.scalar(select(Producto).where(Producto.id == producto_id).with_for_update())
+    if producto is None:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+    if data.destacado and not producto.destacado:
+        destacados = db.scalars(
+            select(Producto).where(Producto.destacado.is_(True)).with_for_update()
+        ).all()
+        if len(destacados) >= 4:
+            raise HTTPException(422, "Podés tener hasta 4 productos destacados. Quitá uno antes de agregar otro.")
+        producto.destacado = True
+        producto.orden_destacado = max((item.orden_destacado or 0 for item in destacados), default=0) + 1
+    elif not data.destacado:
+        producto.destacado = False
+        producto.orden_destacado = None
+    db.commit()
+    db.refresh(producto)
     return producto
 
 
