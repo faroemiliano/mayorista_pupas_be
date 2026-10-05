@@ -73,7 +73,7 @@ def test_crear_pedido_guarda_totales_e_items(
     ))
     assert aviso is not None
     assert aviso.email_destino == "ana@example.com"
-    assert aviso.email_estado == "enviado"
+    assert aviso.email_estado == "omitido"
     assert "quedaron reservadas" in aviso.mensaje
     assert "hasta la entrega" in aviso.mensaje
 
@@ -204,15 +204,22 @@ def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient,
     db.refresh(historico)
     assert historico.estado == "completed"
     assert historico.estado_gestion == "contactado"
+    assert len(emails) == 0
+
+    confirmado = client.patch(
+        f"/api/admin/pedidos/{historico.id}/estado",
+        json={"estado": "confirmado", "origen": "wordpress"},
+    )
+    assert confirmado.status_code == 200
     assert len(emails) == 1
     assert emails[0][0] == "maria@test.local"
     assert "WP-7001" in emails[0][1]
-    assert "Contactado" in emails[0][2]
+    assert "Confirmado" in emails[0][2]
     assert "Hola María Pérez" in emails[0][2]
 
     repetido = client.patch(
         f"/api/admin/pedidos/{historico.id}/estado",
-        json={"estado": "contactado", "origen": "wordpress"},
+        json={"estado": "confirmado", "origen": "wordpress"},
     )
     assert repetido.status_code == 200
     assert len(emails) == 1

@@ -34,7 +34,7 @@ def cambiar_estado(usuario_id:int,data:EstadoRequest,db:Session=Depends(get_db))
     usuario.estado_registro=data.estado;db.commit();db.refresh(usuario)
     titulo="Tu cuenta mayorista fue aprobada" if data.estado=="aprobado" else "Actualización de tu solicitud mayorista"
     mensaje="Ya podés ingresar, ver precios y realizar pedidos." if data.estado=="aprobado" else "Tu solicitud fue rechazada. Contactate con la empresa si necesitás más información."
-    notificar(db,audiencia="cliente",tipo=f"registro_{data.estado}",titulo=titulo,mensaje=mensaje,usuario_id=usuario.id,email=usuario.email)
+    notificar(db,audiencia="cliente",tipo=f"registro_{data.estado}",titulo=titulo,mensaje=mensaje,usuario_id=usuario.id,email=usuario.email,enviar_email=False)
     return usuario
 
 @router.patch("/{usuario_id}/hacer-admin",response_model=UsuarioResponse)

@@ -64,8 +64,11 @@ def _notificar_estado_pedido(db: Session, *, codigo: str, estado: str, nombre: s
         "Ante cualquier duda, estamos a disposición para ayudarte.\n\n"
         "Saludos,\nEquipo de Pupas Mayorista"
     )
-    notificar(db,audiencia="cliente",tipo="estado_pedido",titulo=asunto,mensaje=mensaje,
-              usuario_id=usuario_id,pedido_id=pedido_id,email=email)
+    notificar(
+        db, audiencia="cliente", tipo="estado_pedido", titulo=asunto, mensaje=mensaje,
+        usuario_id=usuario_id, pedido_id=pedido_id, email=email,
+        enviar_email=estado == "confirmado",
+    )
 
 
 def _notificar_reserva_pedido(db: Session, pedido: Pedido, usuario: Usuario) -> None:
@@ -81,8 +84,11 @@ def _notificar_reserva_pedido(db: Session, pedido: Pedido, usuario: Usuario) -> 
         "También podés consultar el estado en cualquier momento desde el sector Mi cuenta.\n\n"
         "Gracias por elegirnos.\nEquipo de Pupas Mayorista"
     )
-    notificar(db,audiencia="cliente",tipo="reserva_pedido",titulo=asunto,mensaje=mensaje,
-              usuario_id=usuario.id,pedido_id=pedido.id,email=pedido.cliente_email or usuario.email)
+    notificar(
+        db, audiencia="cliente", tipo="reserva_pedido", titulo=asunto, mensaje=mensaje,
+        usuario_id=usuario.id, pedido_id=pedido.id, email=pedido.cliente_email or usuario.email,
+        enviar_email=False,
+    )
 
 
 def _generar_codigo(db: Session) -> str:

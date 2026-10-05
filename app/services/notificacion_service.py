@@ -57,12 +57,12 @@ def _enviar_email(destino: str | None, asunto: str, contenido: str) -> tuple[str
 
 def notificar(db: Session, *, audiencia: str, tipo: str, titulo: str, mensaje: str,
               usuario_id: int | None = None, pedido_id: int | None = None,
-              email: str | None = None) -> Notificacion:
+              email: str | None = None, enviar_email: bool = True) -> Notificacion:
     notificacion = Notificacion(usuario_id=usuario_id, pedido_id=pedido_id, audiencia=audiencia,
                                 tipo=tipo, titulo=titulo, mensaje=mensaje, email_destino=email)
     db.add(notificacion)
     db.commit()
-    estado, error = _enviar_email(email, titulo, mensaje)
+    estado, error = _enviar_email(email, titulo, mensaje) if enviar_email else ("omitido", None)
     notificacion.email_estado = estado
     notificacion.email_error = error
     db.commit()
