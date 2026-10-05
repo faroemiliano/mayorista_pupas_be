@@ -260,7 +260,9 @@ def get_pedidos_por_referencias(db: Session, referencias: list[tuple[str, int]])
     ids_wordpress = [identificador for origen, identificador in referencias if origen == "wordpress"]
     tienda = {
         pedido.id: pedido for pedido in db.scalars(
-            select(Pedido).options(selectinload(Pedido.items)).where(Pedido.id.in_(ids_tienda))
+            select(Pedido)
+            .options(selectinload(Pedido.items), selectinload(Pedido.usuario))
+            .where(Pedido.id.in_(ids_tienda))
         ).all()
     } if ids_tienda else {}
     wordpress = {

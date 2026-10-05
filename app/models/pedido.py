@@ -115,3 +115,9 @@ class Pedido(Base):
         back_populates="pedido",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def cliente_apellido(self) -> str | None:
+        """Apellido de la cuenta asociada, disponible al serializar pedidos antiguos."""
+        apellido = self.usuario.apellido if self.usuario else None
+        return apellido.strip() if apellido and apellido.strip() else None
