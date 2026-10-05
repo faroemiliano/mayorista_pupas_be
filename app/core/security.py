@@ -28,5 +28,8 @@ def require_cliente(usuario:Usuario|None=Depends(get_usuario_opcional))->Usuario
     if usuario is None:raise HTTPException(status_code=401,detail="Tenés que iniciar sesión.")
     return usuario
 def require_admin(usuario:Usuario=Depends(require_cliente))->Usuario:
-    if usuario.rol!="admin":raise HTTPException(status_code=403,detail="Se requiere permiso de administrador.")
+    if usuario.rol not in {"admin", "admin_operativo"}:raise HTTPException(status_code=403,detail="Se requiere permiso de administrador.")
+    return usuario
+def require_admin_total(usuario:Usuario=Depends(require_cliente))->Usuario:
+    if usuario.rol!="admin":raise HTTPException(status_code=403,detail="Se requiere permiso de administrador total.")
     return usuario

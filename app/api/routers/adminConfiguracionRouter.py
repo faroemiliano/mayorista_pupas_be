@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.security import require_admin
+from app.core.security import require_admin, require_admin_total
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -42,18 +42,18 @@ def estado_dux():
 
 
 @router.patch("/dux/modo", response_model=EstadoDuxResponse)
-def cambiar_modo_dux(data: ModoDuxRequest):
+def cambiar_modo_dux(data: ModoDuxRequest, _: object = Depends(require_admin_total)):
     settings.DUX_SINCRONIZACION_HABILITADA = data.habilitado
     return estado_dux()
 
 
 @router.get("/dux/auditoria-stock")
-def obtener_auditoria_stock(db: Session = Depends(get_db)):
+def obtener_auditoria_stock(db: Session = Depends(get_db), _: object = Depends(require_admin_total)):
     return obtener_auditoria_stock_dux(db)
 
 
 @router.post("/dux/comparar-stock", status_code=status.HTTP_202_ACCEPTED)
-def comparar_stock(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def comparar_stock(background_tasks: BackgroundTasks, db: Session = Depends(get_db), _: object = Depends(require_admin_total)):
     try:
         estado_actual = preparar_auditoria_stock_dux(db)
     except ValueError as error:

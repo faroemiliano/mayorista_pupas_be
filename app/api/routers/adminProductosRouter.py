@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database.session import get_db
-from app.core.security import require_admin
+from app.core.security import require_admin, require_admin_total
 from app.core.config import settings
 from app.schemas.admin_producto_schemas import ProductoAnaliticaResponse
 from app.models.producto import Producto
@@ -263,6 +263,7 @@ def obtener_analitica_productos(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
+    _: object = Depends(require_admin_total),
 ):
     if (fecha_desde is None) != (fecha_hasta is None):
         raise HTTPException(422, "Indicá ambas fechas para comparar un período.")

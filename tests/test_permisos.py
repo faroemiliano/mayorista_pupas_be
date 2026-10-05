@@ -13,6 +13,32 @@ def test_visitante_no_puede_ver_mis_pedidos(public_client):
     assert public_client.get("/api/pedidos/mios").status_code == 401
 
 
+def test_admin_operativo_no_accede_a_analitica_migracion_ni_configuracion(engine):
+    from fastapi.testclient import TestClient
+    from app.core.security import get_usuario_opcional
+    from app.database.session import get_db
+    from app.main import app
+    from app.models.usuario import Usuario
+    from sqlalchemy.orm import Session
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_usuario_opcional] = lambda: Usuario(
+        id=2, email="operativa@test.local", nombre="Operativa", rol="admin_operativo", activo=True,
+    )
+    try:
+        with TestClient(app) as operativa:
+            assert operativa.get("/api/admin/pedidos/").status_code == 200
+            assert operativa.get("/api/admin/productos/analitica").status_code == 403
+            assert operativa.get("/api/admin/migracion-wordpress/resumen").status_code == 403
+            assert operativa.patch("/api/admin/configuracion/dux/modo", json={"habilitado": True}).status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_registro_guarda_perfil_comercial(public_client, db):
     from app.models.usuario import Usuario
     from sqlalchemy import select

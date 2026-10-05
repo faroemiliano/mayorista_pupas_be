@@ -73,7 +73,7 @@ def obtener_pedido(
         referencia,
         usuario.id,
         origen=origen,
-        puede_ver_todos=usuario.rol == "admin",
+        puede_ver_todos=usuario.rol in {"admin", "admin_operativo"},
     )
     if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
