@@ -65,7 +65,7 @@ def _enviar_enlace_restablecimiento(usuario: Usuario, db: Session, *, forzar: bo
 def solicitar_reset_password(data:SolicitarResetPasswordRequest,db:Session=Depends(get_db)):
     usuario=get_usuario_by_email(db,data.email.strip().lower())
     if usuario and usuario.activo:
-        _enviar_enlace_restablecimiento(usuario, db, forzar=True)
+        _enviar_enlace_restablecimiento(usuario, db)
     return RESET_RESPONSE
 
 @router.post("/restablecer-password")

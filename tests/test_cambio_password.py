@@ -123,6 +123,48 @@ def test_reconocer_cuenta_migrada_no_envia_dos_enlaces(engine, monkeypatch):
         app.dependency_overrides.clear()
 
 
+def test_reintento_inmediato_no_invalida_el_enlace_de_restablecimiento(engine, monkeypatch):
+    with Session(engine) as db:
+        db.add(Usuario(
+            email="sin-doble-envio@test.local",
+            nombre="Cliente Pupas",
+            password_hash=None,
+            rol="cliente",
+            activo=True,
+            estado_registro="aprobado",
+            origen="wordpress",
+            wordpress_id=458,
+            requiere_migracion_password=True,
+        ))
+        db.commit()
+
+    enviados = []
+
+    class RespuestaExitosa:
+        def raise_for_status(self):
+            return None
+
+    def enviar(*args, **kwargs):
+        enviados.append((args, kwargs))
+        return RespuestaExitosa()
+
+    monkeypatch.setattr("app.api.routers.authRouter.settings.RESEND_API_KEY", "resend-test")
+    monkeypatch.setattr("app.api.routers.authRouter.httpx.post", enviar)
+
+    def override_get_db():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            assert client.post("/api/auth/solicitar-reset-password", json={"email": "sin-doble-envio@test.local"}).status_code == 200
+            assert client.post("/api/auth/solicitar-reset-password", json={"email": "sin-doble-envio@test.local"}).status_code == 200
+        assert len(enviados) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_usuario_cambia_su_password(engine):
     with Session(engine) as db:
         usuario = Usuario(
