@@ -38,9 +38,9 @@ class PedidoError(ValueError):
 
 
 ESTADO_PEDIDO_ETIQUETAS = {
-    "pendiente": "Pendiente",
-    "contactado": "Contactado",
-    "confirmado": "Confirmado",
+    "pendiente": "En espera",
+    "contactado": "Procesado",
+    "confirmado": "Completado",
     "cancelado": "Cancelado",
 }
 

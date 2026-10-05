@@ -214,7 +214,7 @@ def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient,
     assert len(emails) == 1
     assert emails[0][0] == "maria@test.local"
     assert "WP-7001" in emails[0][1]
-    assert "Confirmado" in emails[0][2]
+    assert "Completado" in emails[0][2]
     assert "Hola María Pérez" in emails[0][2]
 
     repetido = client.patch(
