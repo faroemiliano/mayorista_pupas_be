@@ -93,7 +93,7 @@ def _notificar_reserva_pedido(db: Session, pedido: Pedido, usuario: Usuario) -> 
 
 def _generar_codigo(db: Session) -> str:
     while True:
-        codigo = f"PUP-{secrets.token_hex(6).upper()}"
+        codigo = f"TMP-{secrets.token_hex(6).upper()}"
         if get_pedido_by_codigo(db, codigo) is None:
             return codigo
 
@@ -152,6 +152,10 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
         ))
 
     db.add(pedido)
+    db.flush()
+    # Una vez asignado el ID interno, se usa como referencia corta y fácil de
+    # comunicar. El temporal sólo existe dentro de esta transacción.
+    pedido.codigo = f"PUP-{pedido.id}"
     liberar_reservas_carrito(db, usuario.id)
     db.commit()
     db.refresh(pedido)

@@ -55,6 +55,7 @@ def test_crear_pedido_guarda_totales_e_items(
     assert response.status_code == 201, response.text
     pedido = response.json()
     assert pedido["codigo"].startswith("PUP-")
+    assert pedido["codigo"].removeprefix("PUP-").isdecimal()
     assert pedido["estado"] == "pendiente"
     assert pedido["cantidad_unidades"] == 24
     assert pedido["subtotal_sin_descuento"] == "144000.00"
