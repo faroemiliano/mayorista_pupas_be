@@ -85,6 +85,7 @@ def listar_pedidos_admin(
     estado: str | None = Query(default=None, max_length=40),
     origen: str = Query(default="todos", pattern="^(todos|tienda|wordpress)$"),
     buscar: str | None = Query(default=None, max_length=150),
+    orden: Literal["fecha_desc", "total_desc", "total_asc"] = "fecha_desc",
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     page: int = Query(default=1, ge=1),
@@ -98,6 +99,7 @@ def listar_pedidos_admin(
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
             origen=origen,
+            orden=orden,
         )
     except PedidoError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

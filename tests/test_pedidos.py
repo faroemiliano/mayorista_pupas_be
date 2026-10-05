@@ -396,6 +396,29 @@ def test_admin_filtra_pedidos_por_mes_y_cliente(client: TestClient, db: Session)
     assert response.json()["items"][0]["codigo"] == "PUP-OCTUBRE-ANA"
 
 
+def test_admin_ordena_pedidos_por_total(client: TestClient, db: Session):
+    base = dict(
+        usuario_id=None, estado="pendiente", cliente_nombre="Cliente",
+        cliente_telefono="3410000000", provincia="Santa Fe", localidad="Rosario",
+        direccion="Calle 123", cantidad_productos_diferentes=1, cantidad_unidades=1,
+        aplica_precio_24_productos=False, subtotal_sin_descuento=Decimal("1"),
+        descuento_aplicado=Decimal("0"),
+    )
+    db.add_all([
+        Pedido(codigo="PUP-TOTAL-BAJO", total=Decimal("100"), **base),
+        Pedido(codigo="PUP-TOTAL-ALTO", total=Decimal("900"), **base),
+    ])
+    db.commit()
+
+    mayor = client.get("/api/admin/pedidos/", params={"origen": "tienda", "orden": "total_desc"})
+    menor = client.get("/api/admin/pedidos/", params={"origen": "tienda", "orden": "total_asc"})
+
+    assert mayor.status_code == 200, mayor.text
+    assert mayor.json()["items"][0]["codigo"] == "PUP-TOTAL-ALTO"
+    assert menor.status_code == 200, menor.text
+    assert menor.json()["items"][0]["codigo"] == "PUP-TOTAL-BAJO"
+
+
 def test_reserva_enviada_espera_a_que_dux_impacte_el_pedido(db, monkeypatch):
     from app.core.config import settings
 

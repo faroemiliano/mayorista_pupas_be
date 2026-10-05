@@ -163,6 +163,7 @@ def get_referencias_pedidos_admin(
     fecha_desde: datetime | None = None,
     fecha_hasta: datetime | None = None,
     origen: str = "todos",
+    orden: str = "fecha_desc",
 ) -> tuple[list[tuple[str, int]], int]:
     consultas = []
     if origen in ("todos", "tienda"):
@@ -170,6 +171,7 @@ def get_referencias_pedidos_admin(
             literal("tienda").label("origen"),
             Pedido.id.label("id"),
             Pedido.creado_en.label("fecha"),
+            Pedido.total.label("total"),
         )
         if estado:
             tienda = tienda.where(Pedido.estado == estado)
@@ -191,6 +193,7 @@ def get_referencias_pedidos_admin(
             literal("wordpress").label("origen"),
             PedidoHistoricoWordpress.id.label("id"),
             PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
+            PedidoHistoricoWordpress.total.label("total"),
         ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id)
         if estado:
             wordpress = wordpress.where(_filtro_estado_historico(estado))
@@ -210,9 +213,14 @@ def get_referencias_pedidos_admin(
 
     combinada = union_all(*consultas).subquery()
     total = db.scalar(select(func.count()).select_from(combinada)) or 0
+    ordenamiento = {
+        "fecha_desc": (combinada.c.fecha.desc(), combinada.c.id.desc()),
+        "total_desc": (combinada.c.total.desc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
+        "total_asc": (combinada.c.total.asc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
+    }[orden]
     filas = db.execute(
         select(combinada.c.origen, combinada.c.id)
-        .order_by(combinada.c.fecha.desc())
+        .order_by(*ordenamiento)
         .offset((page - 1) * limit)
         .limit(limit)
     ).all()

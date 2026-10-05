@@ -308,16 +308,19 @@ def get_pedido_detalle_service(
 def get_pedidos_admin_service(
     db: Session, estado: str | None, page: int, limit: int, buscar: str | None = None,
     fecha_desde: date | None = None, fecha_hasta: date | None = None, origen: str = "todos",
+    orden: str = "fecha_desc",
 ) -> dict:
     if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
         raise PedidoError("La fecha desde no puede ser posterior a la fecha hasta.")
     if origen not in {"todos", "tienda", "wordpress"}:
         raise PedidoError("El origen de pedidos no es válido.")
+    if orden not in {"fecha_desc", "total_desc", "total_asc"}:
+        raise PedidoError("El orden de pedidos no es válido.")
     zona_local = ZoneInfo("America/Argentina/Buenos_Aires")
     desde_dt = datetime.combine(fecha_desde, time.min, zona_local) if fecha_desde else None
     hasta_dt = datetime.combine(fecha_hasta + timedelta(days=1), time.min, zona_local) if fecha_hasta else None
     referencias, total = get_referencias_pedidos_admin(
-        db, estado, page, limit, buscar, desde_dt, hasta_dt, origen,
+        db, estado, page, limit, buscar, desde_dt, hasta_dt, origen, orden,
     )
     pedidos = get_pedidos_por_referencias(db, referencias)
     items = [
