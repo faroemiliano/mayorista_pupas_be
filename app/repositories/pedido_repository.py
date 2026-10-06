@@ -4,7 +4,7 @@ from sqlalchemy import String, and_, case, cast, func, literal, or_, select, uni
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.pedido import Pedido
-from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.models.usuario import Usuario
 
 
@@ -172,6 +172,7 @@ def get_referencias_pedidos_admin(
             Pedido.id.label("id"),
             Pedido.creado_en.label("fecha"),
             Pedido.total.label("total"),
+            Pedido.cantidad_unidades.label("unidades"),
         )
         if estado:
             tienda = tienda.where(Pedido.estado == estado)
@@ -194,7 +195,11 @@ def get_referencias_pedidos_admin(
             PedidoHistoricoWordpress.id.label("id"),
             PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
             PedidoHistoricoWordpress.total.label("total"),
-        ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id)
+            func.coalesce(func.sum(PedidoItemHistoricoWordpress.cantidad), 0).label("unidades"),
+        ).outerjoin(Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id).outerjoin(
+            PedidoItemHistoricoWordpress,
+            PedidoItemHistoricoWordpress.pedido_id == PedidoHistoricoWordpress.id,
+        )
         if estado:
             wordpress = wordpress.where(_filtro_estado_historico(estado))
         if buscar and (termino := buscar.strip()):
@@ -209,6 +214,11 @@ def get_referencias_pedidos_admin(
             wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= fecha_desde)
         if fecha_hasta is not None:
             wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < fecha_hasta)
+        wordpress = wordpress.group_by(
+            PedidoHistoricoWordpress.id,
+            PedidoHistoricoWordpress.creado_en_wordpress,
+            PedidoHistoricoWordpress.total,
+        )
         consultas.append(wordpress)
 
     combinada = union_all(*consultas).subquery()
@@ -217,6 +227,8 @@ def get_referencias_pedidos_admin(
         "fecha_desc": (combinada.c.fecha.desc(), combinada.c.id.desc()),
         "total_desc": (combinada.c.total.desc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
         "total_asc": (combinada.c.total.asc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
+        "unidades_desc": (combinada.c.unidades.desc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
+        "unidades_asc": (combinada.c.unidades.asc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
     }[orden]
     filas = db.execute(
         select(combinada.c.origen, combinada.c.id)

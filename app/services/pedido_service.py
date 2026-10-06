@@ -319,7 +319,7 @@ def get_pedidos_admin_service(
         raise PedidoError("La fecha desde no puede ser posterior a la fecha hasta.")
     if origen not in {"todos", "tienda", "wordpress"}:
         raise PedidoError("El origen de pedidos no es válido.")
-    if orden not in {"fecha_desc", "total_desc", "total_asc"}:
+    if orden not in {"fecha_desc", "total_desc", "total_asc", "unidades_desc", "unidades_asc"}:
         raise PedidoError("El orden de pedidos no es válido.")
     zona_local = ZoneInfo("America/Argentina/Buenos_Aires")
     desde_dt = datetime.combine(fecha_desde, time.min, zona_local) if fecha_desde else None
