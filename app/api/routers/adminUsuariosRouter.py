@@ -12,6 +12,44 @@ from app.services.notificacion_service import notificar
 router=APIRouter(prefix="/api/admin/usuarios",tags=["Administración - Usuarios"],dependencies=[Depends(require_admin)])
 class EstadoRequest(BaseModel): estado:str
 
+
+@router.get("/paginados")
+def listar_clientes_paginados(
+    estado: Literal["pendiente", "aprobado", "rechazado"] | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    base = Usuario.rol == "cliente"
+    estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
+    for estado_registro, cantidad in db.execute(
+        select(Usuario.estado_registro, func.count(Usuario.id))
+        .where(base)
+        .group_by(Usuario.estado_registro)
+    ):
+        if estado_registro in estados:
+            estados[estado_registro] = cantidad
+
+    filtros = [base]
+    if estado:
+        filtros.append(Usuario.estado_registro == estado)
+    total = db.scalar(select(func.count(Usuario.id)).where(*filtros)) or 0
+    items = list(db.scalars(
+        select(Usuario)
+        .where(*filtros)
+        .order_by(Usuario.creado_en.desc(), Usuario.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    ).all())
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_paginas": (total + limit - 1) // limit if total else 0,
+        "totales_estado": estados,
+    }
+
 @router.get("/pendientes",response_model=list[UsuarioResponse])
 def pendientes(db:Session=Depends(get_db)):
     return list(db.scalars(select(Usuario).where(Usuario.rol=="cliente",Usuario.estado_registro=="pendiente").order_by(Usuario.creado_en.asc())).all())
