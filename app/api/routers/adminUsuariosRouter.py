@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 from typing import Literal
 from app.core.security import require_admin
@@ -16,6 +16,8 @@ class EstadoRequest(BaseModel): estado:str
 @router.get("/paginados")
 def listar_clientes_paginados(
     estado: Literal["pendiente", "aprobado", "rechazado"] | None = Query(default=None),
+    cambio_clave: Literal["todos", "pendiente", "creada"] = Query(default="todos"),
+    buscar: str | None = Query(default=None, max_length=150),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -33,6 +35,18 @@ def listar_clientes_paginados(
     filtros = [base]
     if estado:
         filtros.append(Usuario.estado_registro == estado)
+    if cambio_clave == "pendiente":
+        filtros.append(Usuario.requiere_migracion_password.is_(True))
+    elif cambio_clave == "creada":
+        filtros.append(Usuario.requiere_migracion_password.is_(False))
+    if buscar and (termino := buscar.strip()):
+        patron = f"%{termino}%"
+        filtros.append(or_(
+            Usuario.nombre.ilike(patron), Usuario.apellido.ilike(patron),
+            Usuario.email.ilike(patron), Usuario.telefono.ilike(patron),
+            Usuario.documento.ilike(patron), Usuario.localidad_partido.ilike(patron),
+            Usuario.provincia.ilike(patron), cast(Usuario.id, String).ilike(patron),
+        ))
     total = db.scalar(select(func.count(Usuario.id)).where(*filtros)) or 0
     items = list(db.scalars(
         select(Usuario)
