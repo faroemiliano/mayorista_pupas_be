@@ -81,10 +81,8 @@ def test_admin_conserva_historial_de_registros(client, db):
 def test_visitante_no_recibe_precios(public_client, db):
     from app.models.producto import Producto
     from app.models.precio_producto import PrecioProducto
-    from app.models.stock_producto import StockProducto
     producto = Producto(dux_codigo="PUBLICO", nombre="Público", slug="publico", habilitado=True)
     producto.precios.append(PrecioProducto(dux_id_lista=4710, nombre_lista="Mayorista", precio=1000))
-    producto.stocks.append(StockProducto(dux_id_deposito=-1, nombre_deposito="Web", stock_real=1, stock_reservado=0, stock_disponible=1))
     db.add(producto)
     db.commit()
     response = public_client.get("/api/productos/")

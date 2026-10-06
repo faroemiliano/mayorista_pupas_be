@@ -81,14 +81,8 @@ def listar_productos(
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
-    es_administrador = usuario is not None and usuario.rol in {"admin", "admin_operativo"}
     if not solo_habilitados and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sólo un administrador puede ver productos ocultos.")
-
-    # La tienda pública nunca ofrece artículos sin existencia. Los paneles
-    # administrativos todavía pueden pedir explícitamente los que no tienen stock.
-    if con_stock is None or not es_administrador:
-        con_stock = True
 
     return get_productos_service(
         db=db,
@@ -223,8 +217,7 @@ def obtener_producto_por_slug(
             detail="Producto no encontrado.",
         )
 
-    es_administrador = usuario is not None and usuario.rol in {"admin", "admin_operativo"}
-    if (not producto.visible_tienda or not producto.tiene_stock) and not es_administrador:
+    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto
@@ -255,8 +248,7 @@ def obtener_producto(
             detail="Producto no encontrado.",
         )
 
-    es_administrador = usuario is not None and usuario.rol in {"admin", "admin_operativo"}
-    if (not producto.visible_tienda or not producto.tiene_stock) and not es_administrador:
+    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto
