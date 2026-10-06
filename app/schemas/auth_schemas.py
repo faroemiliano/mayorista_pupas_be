@@ -39,7 +39,7 @@ class RegistroRequest(BaseModel):
     telefono: str = Field(min_length=6, max_length=50)
     provincia: str = Field(min_length=2, max_length=100)
     localidad_partido: str = Field(min_length=2, max_length=150)
-    domicilio: str = Field(min_length=4, max_length=250)
+    domicilio: str | None = Field(default=None, max_length=250)
     canal_venta: str = Field(pattern=r"^(local_fisico|tienda_online|ambos)$")
     tienda_online_url: str | None = Field(default=None, max_length=500)
     password: str = Field(min_length=8, max_length=128)
