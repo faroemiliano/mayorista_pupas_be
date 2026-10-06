@@ -2,6 +2,7 @@ import base64
 import binascii
 from datetime import date
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -53,7 +54,7 @@ class StockTallesRequest(BaseModel):
     talles: list[CantidadTalleRequest] = Field(min_length=1, max_length=30)
 
 class ProductoAdminRequest(BaseModel):
-    codigo: str = Field(min_length=1, max_length=100)
+    codigo: str = Field(default="", max_length=100)
     nombre: str = Field(min_length=2, max_length=200)
     descripcion: str | None = Field(default=None, max_length=10000)
     categoria_id: int | None = Field(default=None, gt=0)
@@ -68,7 +69,7 @@ class ProductoAdminRequest(BaseModel):
 
     @field_validator("codigo", "nombre", mode="before")
     @classmethod
-    def limpiar_texto(cls, valor): return str(valor).strip()
+    def limpiar_texto(cls, valor): return str(valor or "").strip()
 
     @model_validator(mode="after")
     def validar_talles(self):
@@ -102,7 +103,10 @@ def _guardar_producto(db:Session,producto,data:ProductoAdminRequest):
     if data.categoria_id and categoria is None: raise HTTPException(422,"La categoría seleccionada no existe.")
     if data.subcategoria_id and (subcategoria is None or subcategoria.categoria_id!=data.categoria_id): raise HTTPException(422,"La subcategoría no pertenece a la categoría seleccionada.")
     if data.marca_id and marca is None: raise HTTPException(422,"La marca seleccionada no existe.")
-    producto.dux_codigo=data.codigo;producto.codigo_externo=data.codigo;producto.nombre=data.nombre
+    if data.codigo:
+        producto.dux_codigo=data.codigo
+        producto.codigo_externo=data.codigo
+    producto.nombre=data.nombre
     producto.slug=_slug_producto(db,data.nombre,getattr(producto,'id',None));producto.descripcion=data.descripcion or None
     producto.categoria=categoria;producto.subcategoria=subcategoria;producto.marca=marca
     producto.cantidad_unidades_por_bulto=data.cantidad_unidades_por_bulto
@@ -134,9 +138,12 @@ def _guardar_producto(db:Session,producto,data:ProductoAdminRequest):
 @router.post("/",status_code=201)
 def crear_producto(data:ProductoAdminRequest,db:Session=Depends(get_db)):
     from app.models.producto import Producto
-    if db.scalar(select(Producto.id).where(Producto.dux_codigo==data.codigo)): raise HTTPException(409,"Ya existe un producto con ese código.")
-    producto=Producto(dux_codigo=data.codigo,nombre=data.nombre,slug="temporal",origen="web",conciliacion_estado="pendiente")
-    db.add(producto);db.flush();_guardar_producto(db,producto,data);db.commit();db.refresh(producto)
+    if data.codigo and db.scalar(select(Producto.id).where(Producto.dux_codigo==data.codigo)): raise HTTPException(409,"Ya existe un producto con ese código.")
+    producto=Producto(dux_codigo=f"WEB-TEMP-{uuid4().hex}",nombre=data.nombre,slug="temporal",origen="web",conciliacion_estado="pendiente")
+    db.add(producto);db.flush()
+    if not data.codigo:
+        producto.dux_codigo=f"WEB-{producto.id}"
+    _guardar_producto(db,producto,data);db.commit();db.refresh(producto)
     return {"id":producto.id,"mensaje":"Producto creado correctamente."}
 
 @router.put("/{producto_id}")
@@ -144,7 +151,7 @@ def editar_producto(producto_id:int,data:ProductoAdminRequest,db:Session=Depends
     from app.models.producto import Producto
     producto=db.scalar(select(Producto).options(selectinload(Producto.precios),selectinload(Producto.stocks),selectinload(Producto.stocks_talles)).where(Producto.id==producto_id).with_for_update())
     if producto is None: raise HTTPException(404,"Producto no encontrado.")
-    if db.scalar(select(Producto.id).where(Producto.dux_codigo==data.codigo,Producto.id!=producto_id)): raise HTTPException(409,"Ya existe otro producto con ese código.")
+    if data.codigo and db.scalar(select(Producto.id).where(Producto.dux_codigo==data.codigo,Producto.id!=producto_id)): raise HTTPException(409,"Ya existe otro producto con ese código.")
     _guardar_producto(db,producto,data);db.commit()
     return {"id":producto.id,"mensaje":"Producto actualizado correctamente."}
 

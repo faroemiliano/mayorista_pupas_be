@@ -59,3 +59,18 @@ def test_admin_crea_edita_y_carga_imagen_de_producto(client, db):
     producto = db.get(Producto, producto_id)
     assert producto.nombre == "Bikini web actualizado"
     assert sum(item.cantidad for item in producto.stocks_talles) == 6
+
+
+def test_admin_crea_producto_sin_sku_y_genera_codigo_interno(client, db):
+    response = client.post("/api/admin/productos/", json={
+        "codigo": "",
+        "nombre": "Producto sin SKU",
+        "precio_mayorista": 10000,
+        "talles": [{"talle": "Único", "cantidad": 4}],
+    })
+
+    assert response.status_code == 201, response.text
+    producto = db.get(Producto, response.json()["id"])
+    assert producto is not None
+    assert producto.dux_codigo == f"WEB-{producto.id}"
+    assert producto.codigo_externo is None
