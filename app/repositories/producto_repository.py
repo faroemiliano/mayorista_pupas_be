@@ -405,6 +405,23 @@ def get_productos(
 
     if solo_destacados:
         query = query.order_by(Producto.orden_destacado.asc().nulls_last(), Producto.id.desc())
+
+    elif orden == "stock_desc" and con_stock is not None:
+
+        query = query.order_by(
+            stock_efectivo.desc(),
+            Producto.nombre.asc(),
+            Producto.id.asc(),
+        )
+
+    elif orden == "stock_asc" and con_stock is not None:
+
+        query = query.order_by(
+            stock_efectivo.asc(),
+            Producto.nombre.asc(),
+            Producto.id.asc(),
+        )
+
     elif orden == "nombre_desc":
 
         query = query.order_by(
