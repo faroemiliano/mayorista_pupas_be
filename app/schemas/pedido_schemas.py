@@ -19,7 +19,7 @@ class PedidoCreateRequest(BaseModel):
     cliente_nombre: str = Field(min_length=2, max_length=150)
     cliente_telefono: str = Field(min_length=6, max_length=50)
     cliente_email: str | None = Field(default=None, max_length=200)
-    provincia: str = Field(min_length=2, max_length=100)
+    provincia: str = Field(min_length=1, max_length=100)
     localidad: str = Field(min_length=2, max_length=100)
     direccion: str = Field(min_length=4, max_length=250)
     observaciones: str | None = Field(default=None, max_length=1000)

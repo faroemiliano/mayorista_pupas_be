@@ -79,6 +79,19 @@ def test_crear_pedido_guarda_totales_e_items(
     assert "hasta la entrega" in aviso.mensaje
 
 
+def test_crear_pedido_acepta_provincia_de_un_caracter(client: TestClient, db: Session):
+    producto = crear_producto(db, 2, precio_mayorista=Decimal("6000.00"), precio_24=Decimal("5000.00"))
+    db.commit()
+    assert client.put("/api/carrito/reserva", json={"items": [{"producto_id": producto.id, "talle": "1", "cantidad": 1}]}).status_code == 200
+
+    payload = pedido_payload(producto.id, cantidad=1)
+    payload["provincia"] = "B"
+    response = client.post("/api/pedidos/", json=payload)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["provincia"] == "B"
+
+
 def test_pedido_confirmado_programa_envio_automatico_a_dux(client: TestClient, db: Session, monkeypatch):
     producto = crear_producto(db, 1, precio_mayorista=Decimal("6000.00"), precio_24=Decimal("5000.00"))
     db.commit()

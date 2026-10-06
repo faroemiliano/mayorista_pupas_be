@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 
 class GoogleLoginRequest(BaseModel):
@@ -33,7 +34,7 @@ class UsuarioResponse(BaseModel):
 
 class RegistroRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
-    apellido: str = Field(min_length=2, max_length=100)
+    apellido: str = Field(max_length=100)
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
     telefono: str = Field(min_length=6, max_length=50)
     provincia: str = Field(min_length=2, max_length=100)
@@ -46,8 +47,12 @@ class RegistroRequest(BaseModel):
 
     @field_validator("nombre", "apellido", mode="before")
     @classmethod
-    def limpiar_nombre(cls, valor):
-        return str(valor or "").strip()
+    def limpiar_nombre(cls, valor, info):
+        texto = str(valor or "").strip()
+        if not texto:
+            etiqueta = "apellido" if info.field_name == "apellido" else "nombre"
+            raise PydanticCustomError("campo_requerido", f"Ingresá tu {etiqueta}.")
+        return texto
 
     @model_validator(mode="after")
     def validar_passwords(self):
@@ -90,6 +95,7 @@ class CompletarMigracionPasswordRequest(BaseModel):
 
 class ActualizarPerfilRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
+    apellido: str | None = Field(default=None, max_length=100)
     telefono: str = Field(min_length=6, max_length=50)
     documento: str | None = Field(default=None, pattern=r"^\d{7,11}$")
     acepta_promociones_email: bool = False

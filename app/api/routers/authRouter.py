@@ -165,9 +165,11 @@ def me(usuario:Usuario=Depends(require_cliente)):return usuario
 @router.patch("/me",response_model=UsuarioResponse)
 def actualizar_perfil(data:ActualizarPerfilRequest,db:Session=Depends(get_db),usuario:Usuario=Depends(require_cliente)):
     documento=data.documento.strip() if data.documento else None
+    apellido=data.apellido.strip() if data.apellido else None
     if documento and db.scalar(select(Usuario).where(Usuario.documento==documento,Usuario.id!=usuario.id)):
         raise HTTPException(status_code=409,detail="Ese DNI o CUIT ya pertenece a otra cuenta.")
     usuario.nombre=data.nombre.strip();usuario.telefono=data.telefono.strip();usuario.documento=documento
+    if apellido: usuario.apellido=apellido
     usuario.acepta_promociones_email=data.acepta_promociones_email
     usuario.provincia=data.provincia.strip() if data.provincia else None
     usuario.localidad_partido=data.localidad_partido.strip() if data.localidad_partido else None

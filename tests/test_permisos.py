@@ -68,6 +68,24 @@ def test_registro_guarda_perfil_comercial(public_client, db):
     assert usuario.tienda_online_url == "https://tienda.example.com"
 
 
+def test_registro_indica_en_espanol_cuando_falta_apellido(public_client):
+    response = public_client.post("/api/auth/registro", json={
+        "nombre": "Tienda Prueba",
+        "apellido": "",
+        "email": "sin.apellido@test.local",
+        "telefono": "3415551234",
+        "password": "password-seguro",
+        "confirmar_password": "password-seguro",
+        "provincia": "Santa Fe",
+        "localidad_partido": "Rosario",
+        "domicilio": "Calle Prueba 123",
+        "canal_venta": "ambos",
+    })
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Ingresá tu apellido."
+
+
 def test_admin_conserva_historial_de_registros(client, db):
     from app.models.usuario import Usuario
 
