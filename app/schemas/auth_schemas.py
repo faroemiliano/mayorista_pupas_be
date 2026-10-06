@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class GoogleLoginRequest(BaseModel):
@@ -33,6 +33,7 @@ class UsuarioResponse(BaseModel):
 
 class RegistroRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
+    apellido: str = Field(min_length=2, max_length=100)
     email: str = Field(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$", max_length=255)
     telefono: str = Field(min_length=6, max_length=50)
     provincia: str = Field(min_length=2, max_length=100)
@@ -42,6 +43,11 @@ class RegistroRequest(BaseModel):
     tienda_online_url: str | None = Field(default=None, max_length=500)
     password: str = Field(min_length=8, max_length=128)
     confirmar_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("nombre", "apellido", mode="before")
+    @classmethod
+    def limpiar_nombre(cls, valor):
+        return str(valor or "").strip()
 
     @model_validator(mode="after")
     def validar_passwords(self):

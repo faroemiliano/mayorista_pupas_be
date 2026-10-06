@@ -45,6 +45,7 @@ def test_registro_guarda_perfil_comercial(public_client, db):
 
     response = public_client.post("/api/auth/registro", json={
         "nombre": "Tienda Prueba",
+        "apellido": "García",
         "email": "tienda.prueba@test.local",
         "telefono": "3415551234",
         "password": "password-seguro",
@@ -59,6 +60,7 @@ def test_registro_guarda_perfil_comercial(public_client, db):
     assert response.status_code == 201, response.text
     usuario = db.scalar(select(Usuario).where(Usuario.email == "tienda.prueba@test.local"))
     assert usuario is not None
+    assert usuario.apellido == "García"
     assert usuario.provincia == "Santa Fe"
     assert usuario.localidad_partido == "Rosario"
     assert usuario.domicilio == "Calle Prueba 123"
