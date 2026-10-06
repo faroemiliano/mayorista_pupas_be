@@ -17,6 +17,7 @@ from app.repositories.pedido_repository import (
     get_pedido_by_codigo,
     get_pedido_historico,
     get_pedido_historico_by_codigo,
+    get_conteos_estado_pedidos_admin,
     get_pedidos,
     get_pedidos_por_referencias,
     get_referencias_pedidos_admin,
@@ -326,12 +327,16 @@ def get_pedidos_admin_service(
     referencias, total = get_referencias_pedidos_admin(
         db, estado, page, limit, buscar, desde_dt, hasta_dt, origen, orden,
     )
+    conteos_estado = get_conteos_estado_pedidos_admin(
+        db, buscar, desde_dt, hasta_dt, origen,
+    )
     pedidos = get_pedidos_por_referencias(db, referencias)
     items = [
         _serializar_pedido_historico(pedido) if referencia[0] == "wordpress" else pedido
         for referencia, pedido in zip(referencias, pedidos)
     ]
     return {"items": items, "total": total, "page": page, "limit": limit,
+            "conteos_estado": conteos_estado,
             "total_paginas": ceil(total / limit) if total else 0}
 
 

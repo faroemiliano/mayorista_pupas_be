@@ -87,6 +87,7 @@ class PedidoResponse(BaseModel):
 class PedidoListadoResponse(BaseModel):
     items: list[PedidoResponse]
     total: int
+    conteos_estado: dict[str, int] = Field(default_factory=dict)
     page: int
     limit: int
     total_paginas: int

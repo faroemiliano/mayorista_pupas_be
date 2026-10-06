@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import String, and_, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.pedido import Pedido
@@ -225,6 +225,73 @@ def get_referencias_pedidos_admin(
         .limit(limit)
     ).all()
     return [(fila.origen, fila.id) for fila in filas], total
+
+
+def get_conteos_estado_pedidos_admin(
+    db: Session,
+    buscar: str | None = None,
+    fecha_desde: datetime | None = None,
+    fecha_hasta: datetime | None = None,
+    origen: str = "todos",
+) -> dict[str, int]:
+    """Obtiene todos los contadores de estado en una sola consulta.
+
+    La lista de administración combina pedidos propios e históricos. Antes la
+    pantalla hacía una consulta completa adicional por cada botón de estado,
+    lo cual era costoso con el historial de WooCommerce.
+    """
+    consultas = []
+    if origen in ("todos", "tienda"):
+        tienda = select(Pedido.estado.label("estado"))
+        if buscar and (termino := buscar.strip()):
+            patron = f"%{termino}%"
+            tienda = tienda.where(or_(
+                Pedido.codigo.ilike(patron), Pedido.cliente_nombre.ilike(patron),
+                Pedido.cliente_email.ilike(patron), Pedido.cliente_telefono.ilike(patron),
+                cast(Pedido.id, String).ilike(patron),
+            ))
+        if fecha_desde is not None:
+            tienda = tienda.where(Pedido.creado_en >= fecha_desde)
+        if fecha_hasta is not None:
+            tienda = tienda.where(Pedido.creado_en < fecha_hasta)
+        consultas.append(tienda)
+
+    if origen in ("todos", "wordpress"):
+        estado_historico = func.coalesce(
+            PedidoHistoricoWordpress.estado_gestion,
+            case(
+                (PedidoHistoricoWordpress.estado.in_(("pending", "on-hold")), "pendiente"),
+                (PedidoHistoricoWordpress.estado.in_(("processing", "completed")), "confirmado"),
+                (PedidoHistoricoWordpress.estado.in_(("cancelled", "refunded", "failed")), "cancelado"),
+                else_="pendiente",
+            ),
+        ).label("estado")
+        wordpress = select(estado_historico).outerjoin(
+            Usuario, Usuario.id == PedidoHistoricoWordpress.usuario_id,
+        )
+        if buscar and (termino := buscar.strip()):
+            patron = f"%{termino}%"
+            wordpress = wordpress.where(or_(
+                PedidoHistoricoWordpress.numero.ilike(patron),
+                cast(PedidoHistoricoWordpress.wordpress_id, String).ilike(patron),
+                Usuario.nombre.ilike(patron), Usuario.apellido.ilike(patron),
+                Usuario.email.ilike(patron), Usuario.telefono.ilike(patron),
+            ))
+        if fecha_desde is not None:
+            wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= fecha_desde)
+        if fecha_hasta is not None:
+            wordpress = wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < fecha_hasta)
+        consultas.append(wordpress)
+
+    if not consultas:
+        return {estado: 0 for estado in ESTADOS_GESTION_PEDIDO}
+    combinada = union_all(*consultas).subquery()
+    filas = db.execute(
+        select(combinada.c.estado, func.count()).group_by(combinada.c.estado)
+    ).all()
+    conteos = {estado: 0 for estado in ESTADOS_GESTION_PEDIDO}
+    conteos.update({str(estado): int(total) for estado, total in filas})
+    return conteos
 
 
 def get_referencias_pedidos_usuario(
