@@ -1,3 +1,6 @@
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import String, cast, func, or_, select
@@ -6,11 +9,50 @@ from typing import Literal
 from app.core.security import require_admin
 from app.database.session import get_db
 from app.models.usuario import Usuario
+from app.models.pedido import Pedido
+from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.schemas.auth_schemas import UsuarioResponse
 from app.services.notificacion_service import notificar
 
 router=APIRouter(prefix="/api/admin/usuarios",tags=["Administración - Usuarios"],dependencies=[Depends(require_admin)])
 class EstadoRequest(BaseModel): estado:str
+
+
+def _resumen_compras_tienda(db: Session, usuario_id: int, desde: datetime | None, hasta: datetime | None) -> dict:
+    filtros = [Pedido.usuario_id == usuario_id, Pedido.estado != "cancelado"]
+    if desde is not None: filtros.append(Pedido.creado_en >= desde)
+    if hasta is not None: filtros.append(Pedido.creado_en < hasta)
+    pedidos, unidades, importe = db.execute(select(
+        func.count(Pedido.id),
+        func.coalesce(func.sum(Pedido.cantidad_unidades), 0),
+        func.coalesce(func.sum(Pedido.total), 0),
+    ).where(*filtros)).one()
+    return {"pedidos": int(pedidos or 0), "unidades": int(unidades or 0), "importe": Decimal(importe or 0)}
+
+
+def _resumen_compras_wordpress(db: Session, usuario_id: int, desde: datetime | None, hasta: datetime | None) -> dict:
+    filtros = [
+        PedidoHistoricoWordpress.usuario_id == usuario_id,
+        PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
+    ]
+    if desde is not None: filtros.append(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None: filtros.append(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
+    pedidos, importe = db.execute(select(
+        func.count(PedidoHistoricoWordpress.id),
+        func.coalesce(func.sum(PedidoHistoricoWordpress.total), 0),
+    ).where(*filtros)).one()
+    unidades = db.scalar(select(func.coalesce(func.sum(PedidoItemHistoricoWordpress.cantidad), 0)).join(
+        PedidoHistoricoWordpress, PedidoHistoricoWordpress.id == PedidoItemHistoricoWordpress.pedido_id,
+    ).where(*filtros)) or 0
+    return {"pedidos": int(pedidos or 0), "unidades": int(unidades or 0), "importe": Decimal(importe or 0)}
+
+
+def _combinar_resumenes(*resumenes: dict) -> dict:
+    return {
+        "pedidos": sum(item["pedidos"] for item in resumenes),
+        "unidades": sum(item["unidades"] for item in resumenes),
+        "importe": sum((item["importe"] for item in resumenes), Decimal("0")),
+    }
 
 
 @router.get("/paginados")
@@ -64,6 +106,7 @@ def listar_clientes_paginados(
         "totales_estado": estados,
     }
 
+
 @router.get("/pendientes",response_model=list[UsuarioResponse])
 def pendientes(db:Session=Depends(get_db)):
     return list(db.scalars(select(Usuario).where(Usuario.rol=="cliente",Usuario.estado_registro=="pendiente").order_by(Usuario.creado_en.asc())).all())
@@ -76,6 +119,40 @@ def listar_clientes(
     consulta=select(Usuario).where(Usuario.rol=="cliente")
     if estado:consulta=consulta.where(Usuario.estado_registro==estado)
     return list(db.scalars(consulta.order_by(Usuario.creado_en.desc())).all())
+
+
+@router.get("/{usuario_id}/balance-compras")
+def obtener_balance_compras_cliente(
+    usuario_id: int,
+    fecha_desde: date | None = Query(default=None),
+    fecha_hasta: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    usuario = db.get(Usuario, usuario_id)
+    if usuario is None or usuario.rol != "cliente":
+        raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(status_code=422, detail="La fecha desde no puede ser posterior a la fecha hasta.")
+
+    desde = datetime.combine(fecha_desde, time.min, timezone.utc) if fecha_desde else None
+    hasta = datetime.combine(fecha_hasta + timedelta(days=1), time.min, timezone.utc) if fecha_hasta else None
+    acumulado = _combinar_resumenes(
+        _resumen_compras_tienda(db, usuario_id, None, None),
+        _resumen_compras_wordpress(db, usuario_id, None, None),
+    )
+    periodo = _combinar_resumenes(
+        _resumen_compras_tienda(db, usuario_id, desde, hasta),
+        _resumen_compras_wordpress(db, usuario_id, desde, hasta),
+    )
+    return {
+        "cliente_id": usuario.id,
+        "cliente": f"{usuario.nombre} {usuario.apellido}".strip(),
+        "acumulado": acumulado,
+        "periodo": periodo,
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "alcance": "Incluye pedidos de la tienda y el historial migrado de WordPress; excluye cancelados, reembolsados y fallidos.",
+    }
 
 @router.patch("/{usuario_id}/estado",response_model=UsuarioResponse)
 def cambiar_estado(usuario_id:int,data:EstadoRequest,db:Session=Depends(get_db)):
