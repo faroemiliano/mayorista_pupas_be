@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 import cloudinary
 import cloudinary.uploader
+import httpx
 from cloudinary.exceptions import Error as CloudinaryError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -109,14 +110,28 @@ def _imagenes_pendientes(
 
 
 def _subir_imagen(imagen: ImagenProducto) -> str:
-    respuesta = cloudinary.uploader.upload(
-        url_desde_origen_wordpress(imagen.url),
-        public_id=f"pupas/wordpress/productos/{imagen.producto_id}/imagenes/{imagen.id}",
-        resource_type="image",
-        overwrite=True,
-        unique_filename=False,
-        tags=["pupas", "wordpress-migracion"],
-    )
+    origen = url_desde_origen_wordpress(imagen.url)
+    opciones = {
+        "public_id": f"pupas/wordpress/productos/{imagen.producto_id}/imagenes/{imagen.id}",
+        "resource_type": "image",
+        "overwrite": True,
+        "unique_filename": False,
+        "tags": ["pupas", "wordpress-migracion"],
+    }
+    try:
+        respuesta = cloudinary.uploader.upload(origen, **opciones)
+    except CloudinaryError:
+        # Algunos hosts entregan bien la foto al navegador pero bloquean la
+        # descarga remota de Cloudinary. En ese caso actuamos como puente una
+        # sola vez y subimos los bytes, sin conservarlos en PostgreSQL.
+        try:
+            descarga = httpx.get(origen, timeout=30.0, follow_redirects=True)
+            descarga.raise_for_status()
+        except httpx.HTTPError as error:
+            raise ValueError("No se pudo descargar la imagen desde el hosting anterior.") from error
+        if not descarga.content or len(descarga.content) > 15 * 1024 * 1024:
+            raise ValueError("La imagen original está vacía o supera los 15 MB.")
+        respuesta = cloudinary.uploader.upload(BytesIO(descarga.content), **opciones)
     return _url_segura_cloudinary(respuesta)
 
 

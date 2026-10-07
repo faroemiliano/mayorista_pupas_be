@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from cloudinary.exceptions import Error as CloudinaryError
 
 from app.core.config import settings
 from app.models.imagen_producto import ImagenProducto
@@ -57,3 +58,47 @@ def test_migracion_de_prueba_limita_y_conserva_origen(db, monkeypatch):
     assert resultado["prueba"] is True
     assert sum(imagen.url.startswith("https://res.cloudinary.com/") for imagen in imagenes) == 2
     assert all(imagen.origen_url for imagen in imagenes[:2])
+
+
+def test_migracion_reintenta_subiendo_bytes_si_cloudinary_no_lee_la_url(db, monkeypatch):
+    url_wordpress = "https://wordpress.test/wp-content/uploads/2026/10/bloqueada.jpg"
+    url_cloudinary = "https://res.cloudinary.com/demo/image/upload/v1/pupas/bloqueada.jpg"
+    producto = Producto(
+        dux_codigo="WP-CLOUD-FALLBACK", nombre="Imagen bloqueada",
+        slug="imagen-bloqueada", origen="wordpress", imagen_url=url_wordpress,
+    )
+    producto.imagenes.append(ImagenProducto(url=url_wordpress, orden=0, principal=True))
+    db.add(producto)
+    db.commit()
+    monkeypatch.setattr(settings, "WOOCOMMERCE_URL", "https://wordpress.test")
+    monkeypatch.setattr(settings, "CLOUDINARY_URL", "cloudinary://key:secret@demo")
+    llamadas = []
+
+    def upload(origen, **_opciones):
+        llamadas.append(origen)
+        if isinstance(origen, str):
+            raise CloudinaryError("El host no permite descarga remota")
+        return {"secure_url": url_cloudinary}
+
+    class Respuesta:
+        content = b"\xff\xd8\xffimagen"
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    monkeypatch.setattr(
+        "app.services.migracion_imagenes_cloudinary_service.cloudinary.uploader.upload",
+        upload,
+    )
+    monkeypatch.setattr(
+        "app.services.migracion_imagenes_cloudinary_service.httpx.get",
+        lambda *_args, **_kwargs: Respuesta(),
+    )
+
+    resultado = migrar_imagenes_a_cloudinary(db, limite=1)
+
+    assert resultado["copiadas"] == 1
+    assert len(llamadas) == 2
+    assert isinstance(llamadas[0], str)
+    assert not isinstance(llamadas[1], str)
