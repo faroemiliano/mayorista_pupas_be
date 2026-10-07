@@ -49,6 +49,9 @@ class PedidoItemResponse(BaseModel):
 
 class PedidoResponse(BaseModel):
     id: int
+    # La cuenta vinculada permite consultar el historial del cliente desde el
+    # panel de pedidos. Puede ser nula en pedidos históricos sin cuenta web.
+    usuario_id: int | None = None
     codigo: str
     estado: str
     cliente_nombre: str

@@ -245,7 +245,8 @@ def _serializar_pedido_historico(pedido) -> dict:
     } for item in pedido.items]
     estado_gestion = estado_gestion_pedido_historico(pedido.estado, pedido.estado_gestion)
     return {
-        "id": pedido.id, "codigo": f"WP-{pedido.numero}", "estado": estado_gestion,
+        "id": pedido.id, "usuario_id": pedido.usuario_id,
+        "codigo": f"WP-{pedido.numero}", "estado": estado_gestion,
         "cliente_nombre": nombre_completo or "Cliente histórico",
         "cliente_primer_nombre": nombre or None,
         "cliente_apellido": apellido or None,
