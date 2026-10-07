@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
+from cloudinary.exceptions import Error as CloudinaryError
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from slugify import slugify
@@ -23,6 +24,7 @@ from app.services.sincronizacion_catalogo_background_service import (
     preparar_sincronizacion_catalogo,
 )
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
+from app.services.migracion_imagenes_cloudinary_service import subir_imagen_producto_a_cloudinary
 
 
 router = APIRouter(prefix="/api/admin/productos", tags=["Administración - Productos"], dependencies=[Depends(require_admin)])
@@ -170,8 +172,18 @@ def agregar_imagen(producto_id:int,data:ImagenProductoAdminRequest,db:Session=De
     principal=data.principal or not producto.imagenes
     if principal:
         for anterior in producto.imagenes: anterior.principal=False
-    imagen=ImagenProducto(producto_id=producto_id,url="pendiente",contenido=contenido,media_type=data.media_type,orden=orden,principal=principal)
-    db.add(imagen);db.flush();imagen.url=f"db:{imagen.id}"
+    imagen=ImagenProducto(producto_id=producto_id,url="pendiente",contenido=None,media_type=data.media_type,orden=orden,principal=principal)
+    db.add(imagen);db.flush()
+    try:
+        imagen.url=subir_imagen_producto_a_cloudinary(
+            contenido=contenido,
+            producto_id=producto_id,
+            imagen_id=imagen.id,
+            nombre=data.nombre,
+        )
+    except (CloudinaryError, ValueError) as error:
+        db.rollback()
+        raise HTTPException(502,"No se pudo guardar la imagen en Cloudinary. Intentá nuevamente.") from error
     if principal: producto.imagen_url=imagen.url
     db.commit();db.refresh(imagen)
     return {"id":imagen.id,"url":imagen.url,"orden":imagen.orden,"principal":imagen.principal}

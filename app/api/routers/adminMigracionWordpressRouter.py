@@ -21,6 +21,7 @@ from app.services.migracion_wordpress_background_service import (
 )
 from app.services.migracion_imagenes_cloudinary_service import (
     ejecutar_migracion_imagenes_cloudinary_background,
+    obtener_diagnostico_imagenes,
     obtener_estado_migracion_imagenes,
     preparar_migracion_imagenes_cloudinary,
 )
@@ -41,6 +42,11 @@ class VincularProductoRequest(BaseModel):
 class EjecutarMigracionRequest(BaseModel):
     confirmar: bool
     actualizar_todo: bool = False
+
+
+class EjecutarMigracionImagenesRequest(BaseModel):
+    confirmar: bool
+    limite: int | None = Field(default=None, ge=1, le=100)
 
 
 class AplicarCoincidenciasRequest(BaseModel):
@@ -192,17 +198,22 @@ def estado_ejecucion_imagenes(db: Session = Depends(get_db)):
     return obtener_estado_migracion_imagenes(db)
 
 
+@router.get("/imagenes/diagnostico")
+def diagnostico_imagenes(db: Session = Depends(get_db)):
+    return obtener_diagnostico_imagenes(db)
+
+
 @router.post("/imagenes/ejecutar", status_code=status.HTTP_202_ACCEPTED)
 def ejecutar_migracion_imagenes(
-    data: EjecutarMigracionRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+    data: EjecutarMigracionImagenesRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
 ):
     if not data.confirmar:
         raise HTTPException(status_code=422, detail="Debe confirmarse la copia de las imágenes.")
     try:
-        estado_actual = preparar_migracion_imagenes_cloudinary(db)
+        estado_actual = preparar_migracion_imagenes_cloudinary(db, limite=data.limite)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    background_tasks.add_task(ejecutar_migracion_imagenes_cloudinary_background)
+    background_tasks.add_task(ejecutar_migracion_imagenes_cloudinary_background, data.limite)
     return estado_actual
 
 

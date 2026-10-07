@@ -3,10 +3,16 @@ import base64
 from sqlalchemy import select
 
 from app.models.categoria import Categoria
+from app.models.imagen_producto import ImagenProducto
 from app.models.producto import Producto
 
 
-def test_admin_crea_edita_y_carga_imagen_de_producto(client, db):
+def test_admin_crea_edita_y_carga_imagen_de_producto(client, db, monkeypatch):
+    url_cloudinary = "https://res.cloudinary.com/demo/image/upload/v1/pupas/producto.png"
+    monkeypatch.setattr(
+        "app.api.routers.adminProductosRouter.subir_imagen_producto_a_cloudinary",
+        lambda **_kwargs: url_cloudinary,
+    )
     categoria = Categoria(nombre="Bikinis", slug="bikinis", activo=True)
     db.add(categoria)
     db.commit()
@@ -44,11 +50,9 @@ def test_admin_crea_edita_y_carga_imagen_de_producto(client, db):
     })
     assert imagen.status_code == 201, imagen.text
     imagen_id = imagen.json()["id"]
-
-    respuesta_imagen = client.get(f"/api/productos/{producto_id}/imagenes/{imagen_id}")
-    assert respuesta_imagen.status_code == 200
-    assert respuesta_imagen.content == png
-    assert respuesta_imagen.headers["content-type"] == "image/png"
+    imagen_guardada = db.get(ImagenProducto, imagen_id)
+    assert imagen_guardada.url == url_cloudinary
+    assert imagen_guardada.contenido is None
 
     payload["nombre"] = "Bikini web actualizado"
     payload["talles"] = [{"talle": "S", "cantidad": 4}, {"talle": "M", "cantidad": 2}]
