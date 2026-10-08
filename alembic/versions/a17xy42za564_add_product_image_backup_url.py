@@ -1,7 +1,7 @@
 """add product image backup url
 
 Revision ID: a17xy42za564
-Revises: z06wx31xy453
+Revises: g93kd70aa129
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = "a17xy42za564"
-down_revision = "z06wx31xy453"
+down_revision = "g93kd70aa129"
 branch_labels = None
 depends_on = None
 
