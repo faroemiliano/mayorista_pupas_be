@@ -51,6 +51,7 @@ def _talles_catalogo(producto: Producto, reservas_talle: dict) -> list[dict]:
 def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
     parsed = urlsplit(url)
     cloud_name = urlsplit(settings.CLOUDINARY_URL).hostname if settings.CLOUDINARY_URL else None
+    r2_host = urlsplit(settings.R2_PUBLIC_BASE_URL).hostname if settings.R2_PUBLIC_BASE_URL else None
     es_imagen_wordpress = es_url_wordpress(url)
     es_imagen_cloudinary = (
         parsed.scheme == "https"
@@ -58,7 +59,12 @@ def _obtener_imagen_catalogo(url: str) -> tuple[bytes, str]:
         and cloud_name is not None
         and parsed.path.startswith(f"/{cloud_name}/")
     )
-    if es_imagen_wordpress or es_imagen_cloudinary:
+    es_imagen_r2 = (
+        parsed.scheme == "https"
+        and r2_host is not None
+        and parsed.hostname == r2_host
+    )
+    if es_imagen_wordpress or es_imagen_cloudinary or es_imagen_r2:
         response = httpx.get(
             url_desde_origen_wordpress(url) if es_imagen_wordpress else url,
             timeout=30.0,
