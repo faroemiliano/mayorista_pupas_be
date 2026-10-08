@@ -24,7 +24,10 @@ from app.services.sincronizacion_catalogo_background_service import (
     preparar_sincronizacion_catalogo,
 )
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
-from app.services.almacenamiento_imagenes_r2_service import subir_imagen_producto
+from app.services.almacenamiento_imagenes_r2_service import (
+    eliminar_imagen_r2_si_corresponde,
+    subir_imagen_producto,
+)
 
 
 router = APIRouter(prefix="/api/admin/productos", tags=["Administración - Productos"], dependencies=[Depends(require_admin)])
@@ -200,19 +203,20 @@ def elegir_imagen_principal(producto_id:int,imagen_id:int,db:Session=Depends(get
     producto.imagen_url=imagen.url;db.commit();return {"id":imagen.id,"principal":True}
 
 @router.delete("/{producto_id}/imagenes/{imagen_id}",status_code=204)
-def eliminar_imagen(producto_id:int,imagen_id:int,db:Session=Depends(get_db)):
+def eliminar_imagen(producto_id:int,imagen_id:int,background_tasks: BackgroundTasks,db:Session=Depends(get_db)):
     from app.models.imagen_producto import ImagenProducto
     from app.models.producto import Producto
     producto=db.scalar(select(Producto).options(selectinload(Producto.imagenes)).where(Producto.id==producto_id))
     imagen=next((i for i in producto.imagenes if i.id==imagen_id),None) if producto else None
     if imagen is None: raise HTTPException(404,"Imagen no encontrada.")
-    era_principal=imagen.principal;db.delete(imagen);db.flush()
+    era_principal=imagen.principal;url_eliminada=imagen.url;db.delete(imagen);db.flush()
     restantes=[i for i in producto.imagenes if i.id!=imagen_id]
     if era_principal:
         siguiente=restantes[0] if restantes else None
         if siguiente:siguiente.principal=True
         producto.imagen_url=siguiente.url if siguiente else None
     db.commit()
+    background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_eliminada)
 
 @router.get("/stock-talles")
 def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Query(20,ge=1,le=100),db:Session=Depends(get_db)):

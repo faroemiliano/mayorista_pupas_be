@@ -27,7 +27,10 @@ from app.services.migracion_imagenes_cloudinary_service import (
 )
 from app.services.migracion_imagenes_r2_service import (
     R2ImagenError,
+    ejecutar_migracion_imagenes_r2_background,
     migrar_imagenes_producto_a_r2,
+    obtener_estado_migracion_imagenes_r2,
+    preparar_migracion_imagenes_r2,
 )
 
 
@@ -239,6 +242,29 @@ def migrar_imagenes_producto_r2(
         raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/imagenes/r2/ejecucion")
+def estado_ejecucion_imagenes_r2(db: Session = Depends(get_db)):
+    return obtener_estado_migracion_imagenes_r2(db)
+
+
+@router.post("/imagenes/r2/ejecutar", status_code=status.HTTP_202_ACCEPTED)
+def ejecutar_migracion_imagenes_r2(
+    data: MigrarProductoR2Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    if not data.confirmar:
+        raise HTTPException(status_code=422, detail="Debe confirmarse la copia a R2.")
+    try:
+        estado_actual = preparar_migracion_imagenes_r2(db)
+    except R2ImagenError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(ejecutar_migracion_imagenes_r2_background)
+    return estado_actual
 
 
 @router.get("/conciliacion-productos")

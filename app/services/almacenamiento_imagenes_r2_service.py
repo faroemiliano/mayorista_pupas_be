@@ -92,6 +92,23 @@ def subir_imagen_producto_a_r2(
     return url_publica_r2(clave)
 
 
+def eliminar_imagen_r2_si_corresponde(url: str) -> None:
+    """Elimina el objeto físico sólo si la URL pertenece al bucket propio."""
+    parsed = urlsplit(url)
+    base = urlsplit(settings.R2_PUBLIC_BASE_URL).hostname if settings.R2_PUBLIC_BASE_URL else None
+    if not (base and parsed.scheme == "https" and parsed.hostname == base):
+        return
+    clave = parsed.path.lstrip("/")
+    if not clave:
+        return
+    try:
+        _cliente_r2().delete_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
+    except Exception:
+        # La foto ya fue quitada de la tienda. Un fallo de limpieza nunca debe
+        # impedir al administrador borrar su registro.
+        logger.exception("No se pudo eliminar una imagen de R2: %s", clave)
+
+
 def subir_imagen_producto(
     *, contenido: bytes, producto_id: int, imagen_id: int, nombre: str, media_type: str
 ) -> str:
