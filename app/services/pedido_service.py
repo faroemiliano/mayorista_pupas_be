@@ -378,3 +378,52 @@ def actualizar_estado_pedido_service(db: Session, pedido_id: int, estado: str, o
                              usuario_id=pedido.usuario_id,pedido_id=pedido.id,
                              email=pedido.cliente_email or (usuario.email if usuario else None))
     return pedido
+
+
+def actualizar_estados_pedidos_lote_service(
+    db: Session,
+    pedidos: list[tuple[int, str]],
+    estado: str,
+) -> dict:
+    """Valida todo el lote antes de cambiar estados uno a uno.
+
+    Cada cambio conserva exactamente la misma lógica de reservas y avisos que
+    la acción individual. La validación previa evita dejar un lote a medias por
+    un pedido inexistente o cancelado que no puede reabrirse.
+    """
+    from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress
+
+    vistos: set[tuple[int, str]] = set()
+    validados: list[tuple[int, str, str]] = []
+    for pedido_id, origen in pedidos:
+        referencia = (pedido_id, origen)
+        if referencia in vistos:
+            continue
+        vistos.add(referencia)
+        if origen == "wordpress":
+            pedido = db.scalar(select(PedidoHistoricoWordpress).where(PedidoHistoricoWordpress.id == pedido_id))
+            if pedido is None:
+                raise PedidoError(f"El pedido histórico {pedido_id} no existe.")
+            actual = _serializar_pedido_historico(pedido)["estado"]
+        else:
+            pedido = get_pedido(db, pedido_id)
+            if pedido is None:
+                raise PedidoError(f"El pedido {pedido_id} no existe.")
+            actual = pedido.estado
+            if actual == "cancelado" and estado != "cancelado":
+                raise PedidoError(f"El pedido {pedido.codigo} está cancelado y no puede reabrirse.")
+            if estado == "cancelado" and pedido.dux_id_pedido is not None:
+                raise PedidoError(f"El pedido {pedido.codigo} ya fue enviado a Dux y no puede cancelarse desde aquí.")
+        validados.append((pedido_id, origen, actual))
+
+    actualizados: list[dict[str, str | int]] = []
+    sin_cambios = 0
+    for pedido_id, origen, actual in validados:
+        if actual == estado:
+            sin_cambios += 1
+            continue
+        pedido_actualizado = actualizar_estado_pedido_service(db, pedido_id, estado, origen)
+        if pedido_actualizado is not None:
+            codigo = pedido_actualizado["codigo"] if isinstance(pedido_actualizado, dict) else pedido_actualizado.codigo
+            actualizados.append({"id": pedido_id, "origen": origen, "codigo": codigo})
+    return {"actualizados": len(actualizados), "sin_cambios": sin_cambios, "pedidos": actualizados}

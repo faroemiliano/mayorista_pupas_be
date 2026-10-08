@@ -176,6 +176,26 @@ def test_admin_lista_y_actualiza_estado_del_pedido(
     assert actualizado.json()["estado"] == "confirmado"
 
 
+def test_admin_actualiza_estado_de_varios_pedidos_a_la_vez(client: TestClient, db: Session):
+    producto = crear_producto(db, 12, precio_mayorista=Decimal("6000.00"), precio_24=Decimal("5000.00"))
+    db.commit()
+    primero = client.post("/api/pedidos/", json=pedido_payload(producto.id, cantidad=1)).json()
+    segundo = client.post("/api/pedidos/", json=pedido_payload(producto.id, cantidad=1)).json()
+
+    response = client.patch("/api/admin/pedidos/estado-lote", json={
+        "estado": "confirmado",
+        "pedidos": [
+            {"id": primero["id"], "origen": "tienda"},
+            {"id": segundo["id"], "origen": "tienda"},
+        ],
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["actualizados"] == 2
+    assert db.get(Pedido, primero["id"]).estado == "confirmado"
+    assert db.get(Pedido, segundo["id"]).estado == "confirmado"
+
+
 def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient, db: Session, monkeypatch):
     emails = []
     monkeypatch.setattr(

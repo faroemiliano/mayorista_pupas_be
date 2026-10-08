@@ -31,6 +31,16 @@ class PedidoEstadoRequest(BaseModel):
     origen: Literal["tienda", "wordpress"] = "tienda"
 
 
+class PedidoEstadoLoteItem(BaseModel):
+    id: int = Field(gt=0)
+    origen: Literal["tienda", "wordpress"] = "tienda"
+
+
+class PedidoEstadoLoteRequest(BaseModel):
+    estado: PedidoEstado
+    pedidos: list[PedidoEstadoLoteItem] = Field(min_length=1, max_length=100)
+
+
 class PedidoItemResponse(BaseModel):
     id: int
     producto_id: int | None

@@ -10,6 +10,7 @@ from app.models.usuario import Usuario
 from app.schemas.pedido_schemas import (
     PedidoCreateRequest,
     PedidoEstado,
+    PedidoEstadoLoteRequest,
     PedidoEstadoRequest,
     PedidoListadoResponse,
     PedidoResponse,
@@ -24,6 +25,7 @@ from app.services.dux_pedido_service import (
 from app.services.pedido_service import (
     PedidoError,
     actualizar_estado_pedido_service,
+    actualizar_estados_pedidos_lote_service,
     crear_pedido_service,
     get_mis_pedidos_service,
     get_pedido_detalle_service,
@@ -136,6 +138,21 @@ def actualizar_estado_pedido(
     if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")
     return pedido
+
+
+@admin_router.patch("/estado-lote")
+def actualizar_estado_pedidos_lote(
+    data: PedidoEstadoLoteRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return actualizar_estados_pedidos_lote_service(
+            db,
+            [(item.id, item.origen) for item in data.pedidos],
+            data.estado,
+        )
+    except PedidoError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 @admin_router.post("/{pedido_id}/enviar-dux", response_model=PedidoResponse)
