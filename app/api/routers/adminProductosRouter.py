@@ -24,7 +24,7 @@ from app.services.sincronizacion_catalogo_background_service import (
     preparar_sincronizacion_catalogo,
 )
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
-from app.services.migracion_imagenes_cloudinary_service import subir_imagen_producto_a_cloudinary
+from app.services.almacenamiento_imagenes_r2_service import subir_imagen_producto
 
 
 router = APIRouter(prefix="/api/admin/productos", tags=["Administración - Productos"], dependencies=[Depends(require_admin)])
@@ -175,11 +175,12 @@ def agregar_imagen(producto_id:int,data:ImagenProductoAdminRequest,db:Session=De
     imagen=ImagenProducto(producto_id=producto_id,url="pendiente",contenido=None,media_type=data.media_type,orden=orden,principal=principal)
     db.add(imagen);db.flush()
     try:
-        imagen.url=subir_imagen_producto_a_cloudinary(
+        imagen.url=subir_imagen_producto(
             contenido=contenido,
             producto_id=producto_id,
             imagen_id=imagen.id,
             nombre=data.nombre,
+            media_type=data.media_type,
         )
     except (CloudinaryError, ValueError) as error:
         db.rollback()

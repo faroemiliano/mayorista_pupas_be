@@ -45,6 +45,10 @@ class ImagenProducto(Base):
     # entrega de Cloudinary para que una importación repetida no duplique fotos.
     origen_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Entrega anterior conservada durante cambios de proveedor (por ejemplo,
+    # Cloudinary -> R2). Permite recuperar una foto sin alterar su origen.
+    respaldo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     contenido: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     media_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

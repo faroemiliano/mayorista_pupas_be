@@ -10,7 +10,7 @@ from app.models.producto import Producto
 def test_admin_crea_edita_y_carga_imagen_de_producto(client, db, monkeypatch):
     url_cloudinary = "https://res.cloudinary.com/demo/image/upload/v1/pupas/producto.png"
     monkeypatch.setattr(
-        "app.api.routers.adminProductosRouter.subir_imagen_producto_a_cloudinary",
+        "app.api.routers.adminProductosRouter.subir_imagen_producto",
         lambda **_kwargs: url_cloudinary,
     )
     categoria = Categoria(nombre="Bikinis", slug="bikinis", activo=True)

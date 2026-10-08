@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "Pupas Mayorista <onboarding@resend.dev>"
     WORDPRESS_MIGRATION_SECRET: str = ""
     CLOUDINARY_URL: str = ""
+    # Almacenamiento propio de imágenes. Si estas variables no están
+    # configuradas, las cargas nuevas continúan usando Cloudinary.
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = ""
+    R2_ENDPOINT_URL: str = ""
+    R2_PUBLIC_BASE_URL: str = ""
 
     @field_validator("CLOUDINARY_URL")
     @classmethod
@@ -56,6 +64,22 @@ class Settings(BaseSettings):
         if not value.startswith("cloudinary://") or "@" not in value:
             raise ValueError("CLOUDINARY_URL debe tener el formato cloudinary://API_KEY:API_SECRET@CLOUD_NAME")
         return value
+
+    @property
+    def r2_imagenes_configurado(self) -> bool:
+        return all((
+            self.R2_ACCOUNT_ID,
+            self.R2_ACCESS_KEY_ID,
+            self.R2_SECRET_ACCESS_KEY,
+            self.R2_BUCKET_NAME,
+            self.R2_PUBLIC_BASE_URL,
+        ))
+
+    @property
+    def r2_endpoint_url(self) -> str:
+        if self.R2_ENDPOINT_URL.strip():
+            return self.R2_ENDPOINT_URL.rstrip("/")
+        return f"https://{self.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
     @property
     def dux_personales_pedidos(self) -> list[int]:
