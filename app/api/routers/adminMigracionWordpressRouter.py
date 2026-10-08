@@ -25,6 +25,10 @@ from app.services.migracion_imagenes_cloudinary_service import (
     obtener_estado_migracion_imagenes,
     preparar_migracion_imagenes_cloudinary,
 )
+from app.services.migracion_imagenes_r2_service import (
+    R2ImagenError,
+    migrar_imagenes_producto_a_r2,
+)
 
 
 router = APIRouter(
@@ -47,6 +51,10 @@ class EjecutarMigracionRequest(BaseModel):
 class EjecutarMigracionImagenesRequest(BaseModel):
     confirmar: bool
     limite: int | None = Field(default=None, ge=1, le=100)
+
+
+class MigrarProductoR2Request(BaseModel):
+    confirmar: bool
 
 
 class AplicarCoincidenciasRequest(BaseModel):
@@ -215,6 +223,22 @@ def ejecutar_migracion_imagenes(
         raise HTTPException(status_code=409, detail=str(error)) from error
     background_tasks.add_task(ejecutar_migracion_imagenes_cloudinary_background, data.limite)
     return estado_actual
+
+
+@router.post("/imagenes/r2/producto/{producto_id}")
+def migrar_imagenes_producto_r2(
+    producto_id: int,
+    data: MigrarProductoR2Request,
+    db: Session = Depends(get_db),
+):
+    if not data.confirmar:
+        raise HTTPException(status_code=422, detail="Debe confirmarse la copia a R2.")
+    try:
+        return migrar_imagenes_producto_a_r2(db, producto_id)
+    except R2ImagenError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/conciliacion-productos")
