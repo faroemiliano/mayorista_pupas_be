@@ -13,11 +13,13 @@ from sqlalchemy.orm import (
 from app.models.categoria import Categoria
 from app.models.marca import Marca
 from app.models.imagen_producto import ImagenProducto
+from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.subcategoria import Subcategoria
 from app.models.reserva_stock import ReservaStock
 from app.services.stock_fuente_service import filtro_stock_fuente_activa
+from app.core.config import settings
 
 
 # =========================================================
@@ -446,6 +448,30 @@ def get_productos(
                 cast(Producto.fecha_creacion_dux, DateTime),
                 Producto.creado_en,
             ).asc().nulls_last(),
+            Producto.id.asc(),
+        )
+
+    elif orden in {"precio_asc", "precio_desc"}:
+        precio_mayorista = (
+            select(
+                PrecioProducto.producto_id.label("producto_id"),
+                PrecioProducto.precio.label("precio"),
+            )
+            .where(PrecioProducto.dux_id_lista == settings.DUX_LISTA_PRECIO_MAYORISTA_ID)
+            .subquery()
+        )
+        query = query.outerjoin(
+            precio_mayorista,
+            precio_mayorista.c.producto_id == Producto.id,
+        )
+        direccion_precio = (
+            precio_mayorista.c.precio.asc()
+            if orden == "precio_asc"
+            else precio_mayorista.c.precio.desc()
+        )
+        query = query.order_by(
+            direccion_precio.nulls_last(),
+            Producto.nombre.asc(),
             Producto.id.asc(),
         )
 
