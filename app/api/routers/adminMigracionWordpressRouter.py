@@ -29,6 +29,7 @@ from app.services.migracion_imagenes_r2_service import (
     R2ImagenError,
     ejecutar_migracion_imagenes_r2_background,
     migrar_imagenes_producto_a_r2,
+    obtener_diagnostico_migracion_imagenes_r2,
     obtener_estado_migracion_imagenes_r2,
     preparar_migracion_imagenes_r2,
 )
@@ -247,6 +248,11 @@ def migrar_imagenes_producto_r2(
 @router.get("/imagenes/r2/ejecucion")
 def estado_ejecucion_imagenes_r2(db: Session = Depends(get_db)):
     return obtener_estado_migracion_imagenes_r2(db)
+
+
+@router.get("/imagenes/r2/diagnostico")
+def diagnostico_imagenes_r2(db: Session = Depends(get_db)):
+    return obtener_diagnostico_migracion_imagenes_r2(db)
 
 
 @router.post("/imagenes/r2/ejecutar", status_code=status.HTTP_202_ACCEPTED)

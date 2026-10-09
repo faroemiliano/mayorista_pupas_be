@@ -33,6 +33,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # El navegador puede reutilizar la autorización CORS durante un día y no
+    # necesita enviar OPTIONS antes de cada consulta al catálogo.
+    max_age=86_400,
 )
 
 

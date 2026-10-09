@@ -46,3 +46,33 @@ def test_migra_todas_las_imagenes_de_un_producto_y_guarda_respaldo(db, monkeypat
     assert imagen_actualizada.respaldo_url == "https://res.cloudinary.com/demo/image/upload/pijama.jpg"
     assert imagen_actualizada.url == f"https://imagenes.pupasmayorista.com.ar/pupas/{imagen.id}.webp"
     assert producto_actualizado.imagen_url == imagen_actualizada.url
+
+
+def test_migra_imagen_principal_sin_registro_de_galeria(db, monkeypatch):
+    producto = Producto(
+        dux_codigo="DUX-R2-PRINCIPAL",
+        nombre="Producto con imagen Dux",
+        slug="producto-con-imagen-dux",
+        imagen_url="https://imagenes.dux.com.ar/producto.jpg",
+    )
+    db.add(producto)
+    db.commit()
+
+    monkeypatch.setattr(settings, "R2_ACCOUNT_ID", "cuenta")
+    monkeypatch.setattr(settings, "R2_ACCESS_KEY_ID", "key")
+    monkeypatch.setattr(settings, "R2_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setattr(settings, "R2_BUCKET_NAME", "pupas-product-images")
+    monkeypatch.setattr(settings, "R2_PUBLIC_BASE_URL", "https://imagenes.pupasmayorista.com.ar")
+    monkeypatch.setattr(migracion_r2, "_obtener_imagen_catalogo", lambda _url: (b"imagen-prueba", "image/jpeg"))
+    monkeypatch.setattr(
+        migracion_r2,
+        "subir_imagen_producto_a_r2",
+        lambda **kwargs: f"https://imagenes.pupasmayorista.com.ar/pupas/{kwargs['producto_id']}/{kwargs['imagen_id']}.jpg",
+    )
+
+    resultado = migracion_r2.migrar_imagenes_producto_a_r2(db, producto.id)
+
+    assert resultado["actualizado"] is True
+    assert resultado["copiadas"] == 1
+    db.expire_all()
+    assert db.get(Producto, producto.id).imagen_url.endswith(f"/{producto.id}/0.jpg")

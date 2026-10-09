@@ -64,6 +64,56 @@ def _pendientes(db: Session, despues_de_id: int, limite: int) -> list[ImagenProd
     ).all())
 
 
+def _filtros_principales_directas(base: str):
+    tiene_fila_equivalente = select(ImagenProducto.id).where(
+        ImagenProducto.producto_id == Producto.id,
+        ImagenProducto.url == Producto.imagen_url,
+    ).exists()
+    return (
+        Producto.imagen_url.is_not(None),
+        ~Producto.imagen_url.like(f"{base}/%"),
+        ~tiene_fila_equivalente,
+    )
+
+
+def _principales_pendientes(db: Session, despues_de_id: int, limite: int) -> list[Producto]:
+    """Productos cuya imagen principal antigua todavía pasa por el backend.
+
+    Algunos productos importados desde Dux sólo tienen ``imagen_url`` y no un
+    registro en ``imagenes_productos``. La migración original no los incluía,
+    por lo que el frontend debía usar /api/productos/{id}/imagen como proxy.
+    """
+    base = settings.R2_PUBLIC_BASE_URL.rstrip("/")
+    return list(db.scalars(
+        select(Producto)
+        .where(
+            Producto.id > despues_de_id,
+            *_filtros_principales_directas(base),
+        )
+        .order_by(Producto.id)
+        .limit(limite)
+    ).all())
+
+
+def _migrar_principal_directa(producto: Producto) -> bool:
+    """Copia a R2 una imagen principal que no posee fila de galería."""
+    if not producto.imagen_url or _es_url_r2(producto.imagen_url):
+        return False
+    if producto.imagen_url.startswith("db:"):
+        # Los datos binarios se migran a través de su fila ImagenProducto.
+        return False
+
+    contenido, media_type = _obtener_imagen_catalogo(producto.imagen_url)
+    producto.imagen_url = subir_imagen_producto_a_r2(
+        contenido=contenido,
+        producto_id=producto.id,
+        # 0 se reserva para la imagen principal histórica sin registro propio.
+        imagen_id=0,
+        media_type=media_type,
+    )
+    return True
+
+
 def preparar_migracion_imagenes_r2(db: Session) -> dict:
     if not r2_imagenes_configurado():
         raise R2ImagenError("R2 no está configurado en el backend.")
@@ -71,8 +121,25 @@ def preparar_migracion_imagenes_r2(db: Session) -> dict:
     if actual.get("estado") == "en_progreso":
         raise ValueError("La migración de imágenes a R2 ya está en progreso.")
     base = settings.R2_PUBLIC_BASE_URL.rstrip("/")
-    pendientes = db.scalar(select(func.count(ImagenProducto.id)).where(~ImagenProducto.url.like(f"{base}/%"))) or 0
+    diagnostico = obtener_diagnostico_migracion_imagenes_r2(db)
+    pendientes = diagnostico["total_pendientes"]
     return _estado(db, estado="en_progreso", progreso={"total": pendientes, "procesadas": 0, "copiadas": 0, "fallidas": 0}, resultado=None, error=None, errores=[], iniciada_en=datetime.now(timezone.utc).isoformat())
+
+
+def obtener_diagnostico_migracion_imagenes_r2(db: Session) -> dict:
+    """Cantidad exacta a copiar antes de iniciar una migración a R2."""
+    base = settings.R2_PUBLIC_BASE_URL.rstrip("/")
+    galeria = db.scalar(
+        select(func.count(ImagenProducto.id)).where(~ImagenProducto.url.like(f"{base}/%"))
+    ) or 0
+    principales_directas = db.scalar(
+        select(func.count(Producto.id)).where(*_filtros_principales_directas(base))
+    ) or 0
+    return {
+        "imagenes_galeria_pendientes": int(galeria),
+        "principales_directas_pendientes": int(principales_directas),
+        "total_pendientes": int(galeria + principales_directas),
+    }
 
 
 def migrar_imagenes_a_r2(db: Session) -> dict:
@@ -101,6 +168,26 @@ def migrar_imagenes_a_r2(db: Session) -> dict:
                     fallidas += 1
                     if len(errores) < 50:
                         errores.append({"imagen_id": imagen.id, "error": str(error)[:300]})
+                procesadas += 1
+            db.commit()
+            _estado(db, estado="en_progreso", progreso={"total": total, "procesadas": procesadas, "copiadas": copiadas, "fallidas": fallidas}, errores=errores)
+
+        # También cubre los productos Dux antiguos cuya única foto vive en
+        # productos.imagen_url y que por eso antes se servían desde Render.
+        ultimo_producto_id = 0
+        while True:
+            lote_principales = _principales_pendientes(db, ultimo_producto_id, 5)
+            if not lote_principales:
+                break
+            for producto in lote_principales:
+                ultimo_producto_id = producto.id
+                try:
+                    if _migrar_principal_directa(producto):
+                        copiadas += 1
+                except Exception as error:
+                    fallidas += 1
+                    if len(errores) < 50:
+                        errores.append({"producto_id": producto.id, "error": str(error)[:300]})
                 procesadas += 1
             db.commit()
             _estado(db, estado="en_progreso", progreso={"total": total, "procesadas": procesadas, "copiadas": copiadas, "fallidas": fallidas}, errores=errores)
@@ -175,12 +262,33 @@ def migrar_imagenes_producto_a_r2(db: Session, producto_id: int) -> dict:
         imagen.url = nueva_url
         if imagen.principal or producto.imagen_url == url_anterior:
             producto.imagen_url = nueva_url
+
+    # Si la imagen principal no estaba en la galería, se copiaba mediante el
+    # proxy de Render. Ahora queda directamente en el dominio propio de R2.
+    principal_directa = False
+    if (
+        producto.imagen_url
+        and not _es_url_r2(producto.imagen_url)
+        and not any(imagen.url == producto.imagen_url for imagen in producto.imagenes)
+    ):
+        try:
+            principal_directa = _migrar_principal_directa(producto)
+        except Exception as error:
+            return {
+                "producto_id": producto.id,
+                "producto": producto.nombre,
+                "copiadas": 0,
+                "omitidas_r2": omitidas,
+                "fallidas": 1,
+                "errores": [{"producto_id": producto.id, "error": str(error)[:300]}],
+                "actualizado": False,
+            }
     db.commit()
 
     return {
         "producto_id": producto.id,
         "producto": producto.nombre,
-        "copiadas": len(preparadas),
+        "copiadas": len(preparadas) + int(principal_directa),
         "omitidas_r2": omitidas,
         "fallidas": 0,
         "errores": [],
