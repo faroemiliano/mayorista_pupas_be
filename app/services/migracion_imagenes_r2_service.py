@@ -72,6 +72,9 @@ def _filtros_principales_directas(base: str):
     return (
         Producto.imagen_url.is_not(None),
         ~Producto.imagen_url.like(f"{base}/%"),
+        # ``db:<id>`` es una referencia interna a una fila ImagenProducto,
+        # no una URL remota que pueda copiarse como imagen principal directa.
+        ~Producto.imagen_url.like("db:%"),
         ~tiene_fila_equivalente,
     )
 
