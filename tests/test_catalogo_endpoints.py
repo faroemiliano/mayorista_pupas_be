@@ -385,7 +385,7 @@ def test_obtener_filtros_publicos_del_catalogo(
         subcategoria["nombre"]
         for subcategoria
         in filtros["categorias"][0]["subcategorias"]
-    ] == ["Abrigos", "Zapatitos"]
+    ] == ["Abrigos"]
     assert [
         marca["nombre"]
         for marca in filtros["marcas"]
