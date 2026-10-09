@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin_total
+from app.core.config import settings
 from app.database.session import get_db
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
@@ -65,53 +66,18 @@ class AplicarCoincidenciasRequest(BaseModel):
     confirmar: bool
 
 
+def require_acciones_migracion_habilitadas() -> None:
+    if not settings.MIGRACION_WORDPRESS_ACCIONES_HABILITADAS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Las acciones de migración están bloqueadas para evitar cambios accidentales.",
+        )
+
+
 def _texto(valor) -> str | None:
     if valor is None or valor == "":
         return None
     return str(valor)
-
-
-def _resumir_producto(datos: dict) -> dict:
-    variaciones = datos.get("_variaciones_completas") or []
-    talles: list[str] = []
-    stock_total = 0
-    precios: set[str] = set()
-    for variacion in variaciones:
-        stock_total += int(variacion.get("stock_quantity") or 0)
-        precio = _texto(variacion.get("price"))
-        if precio:
-            precios.add(precio)
-        for atributo in variacion.get("attributes") or []:
-            opcion = _texto(atributo.get("option"))
-            if opcion and opcion not in talles:
-                talles.append(opcion)
-    imagenes = datos.get("images") or []
-    return {
-        "id": str(datos.get("id", "")),
-        "nombre": datos.get("name") or "Producto sin nombre",
-        "estado": datos.get("status"),
-        "tipo": datos.get("type"),
-        "precio": _texto(datos.get("price")),
-        "precios_variaciones": sorted(precios),
-        "cantidad_variaciones": len(variaciones),
-        "talles": talles,
-        "stock_total": stock_total,
-        "imagen": imagenes[0].get("src") if imagenes else None,
-    }
-
-
-def _resumir_cliente(datos: dict) -> dict:
-    facturacion = datos.get("billing") or {}
-    return {
-        "id": str(datos.get("id", "")),
-        "email": datos.get("email"),
-        "nombre": " ".join(filter(None, [datos.get("first_name"), datos.get("last_name")])).strip(),
-        "telefono": facturacion.get("phone"),
-        "localidad": facturacion.get("city"),
-        "provincia": facturacion.get("state"),
-        "tiene_direccion": bool(facturacion.get("address_1")),
-        "creado_en": datos.get("date_created"),
-    }
 
 
 def _resumir_pedido(datos: dict) -> dict:
@@ -169,19 +135,16 @@ def obtener_resumen(db: Session = Depends(get_db)):
         select(MigracionWooCommerce.tipo, func.count(MigracionWooCommerce.id))
         .group_by(MigracionWooCommerce.tipo)
     ).all())
-    productos = [_resumir_producto(fila.datos) for fila in filas("producto", 10)]
-    clientes = [_resumir_cliente(fila.datos) for fila in filas("cliente", 20)]
     pedidos = [_resumir_pedido(fila.datos) for fila in filas("pedido", 20)]
     return {
         "solo_lectura": True,
+        "acciones_habilitadas": settings.MIGRACION_WORDPRESS_ACCIONES_HABILITADAS,
         "totales": {
             "productos": totales.get("producto", 0),
             "clientes": totales.get("cliente", 0),
             "pedidos": totales.get("pedido", 0),
         },
-        "limite_vista_previa": {"productos": 10, "clientes": 20, "pedidos": 20},
-        "productos": productos,
-        "clientes": clientes,
+        "limite_vista_previa": {"pedidos": 20},
         "pedidos": pedidos,
     }
 
@@ -194,6 +157,7 @@ def estado_ejecucion(db: Session = Depends(get_db)):
 @router.post("/ejecutar", status_code=status.HTTP_202_ACCEPTED)
 def ejecutar_migracion(
     data: EjecutarMigracionRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     if not data.confirmar:
         raise HTTPException(status_code=422, detail="Debe confirmarse la copia de WordPress.")
@@ -218,6 +182,7 @@ def diagnostico_imagenes(db: Session = Depends(get_db)):
 @router.post("/imagenes/ejecutar", status_code=status.HTTP_202_ACCEPTED)
 def ejecutar_migracion_imagenes(
     data: EjecutarMigracionImagenesRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     if not data.confirmar:
         raise HTTPException(status_code=422, detail="Debe confirmarse la copia de las imágenes.")
@@ -234,6 +199,7 @@ def migrar_imagenes_producto_r2(
     producto_id: int,
     data: MigrarProductoR2Request,
     db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     if not data.confirmar:
         raise HTTPException(status_code=422, detail="Debe confirmarse la copia a R2.")
@@ -260,6 +226,7 @@ def ejecutar_migracion_imagenes_r2(
     data: MigrarProductoR2Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     if not data.confirmar:
         raise HTTPException(status_code=422, detail="Debe confirmarse la copia a R2.")
@@ -304,6 +271,7 @@ def estado_ejecucion_conciliacion(db: Session = Depends(get_db)):
 def generar_informe_conciliacion(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     try:
         estado_actual = preparar_generacion_conciliacion(db)
@@ -320,6 +288,7 @@ def generar_informe_conciliacion(
 def aplicar_coincidencias(
     data: AplicarCoincidenciasRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
 ):
     if not data.confirmar:
         raise HTTPException(
@@ -412,7 +381,11 @@ def listar_productos_dudosos(
 
 
 @router.post("/conciliacion-productos/vincular")
-def vincular_producto(data: VincularProductoRequest, db: Session = Depends(get_db)):
+def vincular_producto(
+    data: VincularProductoRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_acciones_migracion_habilitadas),
+):
     try:
         producto = vincular_coincidencia_manual(db, data.wordpress_id, data.dux_codigo)
     except ValueError as error:

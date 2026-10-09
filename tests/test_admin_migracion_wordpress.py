@@ -3,6 +3,11 @@ from sqlalchemy.orm import Session
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
 from app.services import conciliacion_productos_background_service as conciliacion_background
+from app.core.config import settings
+
+
+def _habilitar_acciones_migracion(monkeypatch):
+    monkeypatch.setattr(settings, "MIGRACION_WORDPRESS_ACCIONES_HABILITADAS", True)
 
 
 def test_admin_puede_ver_resumen_de_staging(client, db):
@@ -32,9 +37,8 @@ def test_admin_puede_ver_resumen_de_staging(client, db):
     data = response.json()
     assert data["solo_lectura"] is True
     assert data["totales"] == {"productos": 1, "clientes": 1, "pedidos": 1}
-    assert data["productos"][0]["stock_total"] == 5
-    assert data["productos"][0]["talles"] == ["1", "2"]
-    assert data["clientes"][0]["email"] == "cliente@example.com"
+    assert "productos" not in data
+    assert "clientes" not in data
     assert data["pedidos"][0]["cantidad_unidades"] == 2
 
 
@@ -43,7 +47,17 @@ def test_resumen_de_staging_requiere_admin(public_client):
     assert response.status_code == 401
 
 
-def test_admin_revisa_y_vincula_candidato_dudoso(client, db):
+def test_acciones_de_migracion_quedan_bloqueadas_por_defecto(client):
+    response = client.post(
+        "/api/admin/migracion-wordpress/ejecutar",
+        json={"confirmar": True},
+    )
+    assert response.status_code == 403
+    assert "bloqueadas" in response.json()["detail"]
+
+
+def test_admin_revisa_y_vincula_candidato_dudoso(client, db, monkeypatch):
+    _habilitar_acciones_migracion(monkeypatch)
     db.add_all([
         Producto(wordpress_id=10, origen="wordpress", dux_codigo="WP-10", nombre="Pijama Luna", slug="pijama-luna"),
         MigracionWooCommerce(
@@ -68,6 +82,7 @@ def test_admin_revisa_y_vincula_candidato_dudoso(client, db):
 
 
 def test_admin_inicia_importacion_protegida_en_segundo_plano(client, monkeypatch):
+    _habilitar_acciones_migracion(monkeypatch)
     ejecutado = []
     monkeypatch.setattr(
         "app.api.routers.adminMigracionWordpressRouter.ejecutar_migracion_wordpress_background",
@@ -86,6 +101,7 @@ def test_admin_inicia_importacion_protegida_en_segundo_plano(client, monkeypatch
 def test_admin_inicia_conciliacion_en_segundo_plano_y_evitar_duplicados(
     client, db, monkeypatch,
 ):
+    _habilitar_acciones_migracion(monkeypatch)
     db.add(MigracionWooCommerce(
         tipo="producto",
         id_externo="10",
@@ -165,7 +181,8 @@ def test_generacion_background_actualiza_progreso_y_finaliza(db, monkeypatch):
     }
 
 
-def test_admin_aplica_coincidencias_seguras_solo_con_confirmacion(client, db):
+def test_admin_aplica_coincidencias_seguras_solo_con_confirmacion(client, db, monkeypatch):
+    _habilitar_acciones_migracion(monkeypatch)
     producto = Producto(
         wordpress_id=10,
         origen="wordpress",
