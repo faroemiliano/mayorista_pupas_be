@@ -129,3 +129,98 @@ def get_ventas_temporales(
     ventas = union_all(query_tienda, query_wordpress).subquery()
     query = select(ventas.c.creado_en, ventas.c.total, ventas.c.cantidad_unidades).order_by(ventas.c.creado_en)
     return [dict(row) for row in db.execute(query).mappings().all()]
+
+
+def get_ranking_clientes(
+    db: Session,
+    desde: datetime | None,
+    hasta: datetime | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Agrupa pedidos actuales e históricos por cliente, sin usar datos de Dux.
+
+    El historial de WordPress puede no estar vinculado a una cuenta nueva. En
+    ese caso el email (y, como último recurso, el nombre) conserva un ranking
+    útil sin inventar ni modificar clientes.
+    """
+    pedidos_tienda = select(
+        Pedido.usuario_id,
+        Pedido.cliente_nombre.label("cliente"),
+        Pedido.cliente_email.label("email"),
+        Pedido.total.label("importe"),
+        Pedido.cantidad_unidades.label("unidades"),
+        Pedido.creado_en.label("fecha"),
+    ).where(Pedido.estado != "cancelado")
+    if desde is not None:
+        pedidos_tienda = pedidos_tienda.where(Pedido.creado_en >= desde)
+    if hasta is not None:
+        pedidos_tienda = pedidos_tienda.where(Pedido.creado_en < hasta)
+
+    unidades_historicas = (
+        select(
+            PedidoItemHistoricoWordpress.pedido_id,
+            func.coalesce(func.sum(PedidoItemHistoricoWordpress.cantidad), 0).label("unidades"),
+        )
+        .group_by(PedidoItemHistoricoWordpress.pedido_id)
+        .subquery()
+    )
+    pedidos_wordpress = (
+        select(
+            PedidoHistoricoWordpress.usuario_id,
+            PedidoHistoricoWordpress.facturacion.label("facturacion"),
+            PedidoHistoricoWordpress.total.label("importe"),
+            unidades_historicas.c.unidades,
+            PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
+        )
+        .outerjoin(unidades_historicas, unidades_historicas.c.pedido_id == PedidoHistoricoWordpress.id)
+        .where(PedidoHistoricoWordpress.estado != "cancelled")
+    )
+    if desde is not None:
+        pedidos_wordpress = pedidos_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        pedidos_wordpress = pedidos_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
+
+    ranking: dict[str, dict] = {}
+
+    def acumular(usuario_id, cliente, email, importe, unidades, fecha) -> None:
+        nombre = str(cliente or "Cliente sin nombre").strip() or "Cliente sin nombre"
+        correo = str(email or "").strip().lower()
+        key = f"usuario:{usuario_id}" if usuario_id else (f"email:{correo}" if correo else f"nombre:{nombre.casefold()}")
+        item = ranking.setdefault(key, {
+            "cliente": nombre,
+            "email": correo or None,
+            "pedidos": 0,
+            "unidades": 0,
+            "importe_comprado": 0,
+            "ultima_compra": fecha,
+        })
+        # Preferimos una identidad con nombre real ante registros históricos
+        # que sólo hayan quedado con un email o nombre incompleto.
+        if item["cliente"] == "Cliente sin nombre" and nombre != item["cliente"]:
+            item["cliente"] = nombre
+        if not item["email"] and correo:
+            item["email"] = correo
+        item["pedidos"] += 1
+        item["unidades"] += int(unidades or 0)
+        item["importe_comprado"] += importe or 0
+        if fecha and (item["ultima_compra"] is None or fecha > item["ultima_compra"]):
+            item["ultima_compra"] = fecha
+
+    for row in db.execute(pedidos_tienda).mappings():
+        acumular(**dict(row))
+    for row in db.execute(pedidos_wordpress).mappings():
+        facturacion = row["facturacion"] or {}
+        cliente = " ".join(filter(None, [facturacion.get("first_name"), facturacion.get("last_name")])).strip()
+        acumular(
+            usuario_id=row["usuario_id"],
+            cliente=cliente,
+            email=facturacion.get("email"),
+            importe=row["importe"],
+            unidades=row["unidades"],
+            fecha=row["fecha"],
+        )
+
+    return sorted(
+        ranking.values(),
+        key=lambda item: (-item["importe_comprado"], -item["pedidos"], item["cliente"].casefold()),
+    )[:limit]

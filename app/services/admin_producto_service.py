@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.repositories.admin_producto_repository import get_analitica_productos, get_ventas_temporales
+from app.repositories.admin_producto_repository import get_analitica_productos, get_ranking_clientes, get_ventas_temporales
 
 
 MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
@@ -112,7 +112,6 @@ def get_analitica_productos_service(
         con_ventas,
         key=lambda item: (item["unidades_vendidas"], item["importe_vendido"], item["nombre"]),
     )[:limit]
-    sin_ventas = sorted(sin_ventas, key=lambda item: item["nombre"])[:limit]
     comparacion_anterior = None
     if desde is not None:
         duracion = hasta_exclusivo - desde
@@ -142,6 +141,6 @@ def get_analitica_productos_service(
         "serie_ventas": _crear_serie_ventas(db, desde, hasta, agrupacion),
         "mas_vendidos": mas_vendidos,
         "menos_vendidos": menos_vendidos,
-        "sin_ventas": sin_ventas,
+        "mejores_clientes": get_ranking_clientes(db, desde, hasta_exclusivo, limit=10),
         "comparacion_anterior": comparacion_anterior,
     }

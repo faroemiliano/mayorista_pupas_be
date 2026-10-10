@@ -43,6 +43,15 @@ class VentaTemporalResponse(BaseModel):
     variacion_porcentual: float | None
 
 
+class ClienteRankingResponse(BaseModel):
+    cliente: str
+    email: str | None = None
+    pedidos: int
+    unidades: int
+    importe_comprado: Decimal
+    ultima_compra: datetime | None = None
+
+
 class ProductoAnaliticaResponse(BaseModel):
     origen: str
     alcance: str
@@ -54,5 +63,5 @@ class ProductoAnaliticaResponse(BaseModel):
     serie_ventas: list[VentaTemporalResponse]
     mas_vendidos: list[ProductoVentaRankingResponse]
     menos_vendidos: list[ProductoVentaRankingResponse]
-    sin_ventas: list[ProductoVentaRankingResponse]
+    mejores_clientes: list[ClienteRankingResponse]
     comparacion_anterior: ComparacionPeriodoResponse | None = None

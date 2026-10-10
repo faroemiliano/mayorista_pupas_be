@@ -34,9 +34,9 @@ def crear_producto(db_session, numero: int) -> Producto:
     return producto
 
 
-def test_analitica_clasifica_productos_vendidos_y_sin_ventas(client, db):
+def test_analitica_clasifica_productos_y_rankea_clientes_por_importe(client, db):
     vendido = crear_producto(db, 1)
-    sin_ventas = crear_producto(db, 2)
+    crear_producto(db, 2)
     pedido = client.post(
         "/api/pedidos/",
         json={
@@ -56,7 +56,8 @@ def test_analitica_clasifica_productos_vendidos_y_sin_ventas(client, db):
     assert data["origen"] == "pedidos_tienda"
     assert data["resumen"]["unidades_vendidas"] == 50
     assert data["mas_vendidos"][0]["producto_id"] == vendido.id
-    assert data["sin_ventas"][0]["producto_id"] == sin_ventas.id
+    assert data["mejores_clientes"][0]["cliente"] == "Cliente"
+    assert data["mejores_clientes"][0]["pedidos"] == 1
     assert data["agrupacion"] == "dia"
     assert data["serie_ventas"][-1]["pedidos"] == 1
     assert data["serie_ventas"][-1]["unidades"] == 50
