@@ -33,6 +33,7 @@ def test_admin_operativo_no_accede_a_analitica_migracion_ni_configuracion(engine
         with TestClient(app) as operativa:
             assert operativa.get("/api/admin/pedidos/").status_code == 200
             assert operativa.get("/api/admin/productos/analitica").status_code == 403
+            assert operativa.get("/api/admin/trafico").status_code == 403
             assert operativa.get("/api/admin/migracion-wordpress/resumen").status_code == 403
             assert operativa.patch("/api/admin/configuracion/dux/modo", json={"habilitado": True}).status_code == 403
     finally:

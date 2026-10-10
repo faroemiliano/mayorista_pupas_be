@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     R2_BUCKET_NAME: str = ""
     R2_ENDPOINT_URL: str = ""
     R2_PUBLIC_BASE_URL: str = ""
+    # Google Analytics 4. Se configura únicamente en Render; el JSON de la
+    # cuenta de servicio no se expone nunca al navegador.
+    GA4_PROPERTY_ID: str = ""
+    GA4_SERVICE_ACCOUNT_JSON: str = ""
 
     @field_validator("CLOUDINARY_URL")
     @classmethod
@@ -83,6 +87,10 @@ class Settings(BaseSettings):
         if self.R2_ENDPOINT_URL.strip():
             return self.R2_ENDPOINT_URL.rstrip("/")
         return f"https://{self.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+    @property
+    def ga4_analytics_configurado(self) -> bool:
+        return bool(self.GA4_PROPERTY_ID.strip() and self.GA4_SERVICE_ACCOUNT_JSON.strip())
 
     @property
     def dux_personales_pedidos(self) -> list[int]:
