@@ -12,6 +12,15 @@ from app.repositories.usuario_repository import get_usuario_by_id
 
 bearer=HTTPBearer(auto_error=False)
 password_hash=PasswordHash.recommended()
+ROLES_ADMINISTRATIVOS = frozenset({"admin_tecnico", "admin", "admin_operativo"})
+ROLES_ADMIN_TOTAL = frozenset({"admin_tecnico", "admin"})
+
+def es_administrador(usuario: Usuario | None) -> bool:
+    return usuario is not None and usuario.rol in ROLES_ADMINISTRATIVOS
+
+def es_admin_tecnico(usuario: Usuario | None) -> bool:
+    return usuario is not None and usuario.rol == "admin_tecnico"
+
 def crear_token(usuario:Usuario)->str:
     exp=datetime.now(timezone.utc)+timedelta(minutes=settings.AUTH_TOKEN_MINUTES)
     return jwt.encode({"sub":str(usuario.id),"exp":exp},settings.AUTH_SECRET_KEY,algorithm="HS256")
@@ -28,8 +37,11 @@ def require_cliente(usuario:Usuario|None=Depends(get_usuario_opcional))->Usuario
     if usuario is None:raise HTTPException(status_code=401,detail="Tenés que iniciar sesión.")
     return usuario
 def require_admin(usuario:Usuario=Depends(require_cliente))->Usuario:
-    if usuario.rol not in {"admin", "admin_operativo"}:raise HTTPException(status_code=403,detail="Se requiere permiso de administrador.")
+    if not es_administrador(usuario):raise HTTPException(status_code=403,detail="Se requiere permiso de administrador.")
     return usuario
 def require_admin_total(usuario:Usuario=Depends(require_cliente))->Usuario:
-    if usuario.rol!="admin":raise HTTPException(status_code=403,detail="Se requiere permiso de administrador total.")
+    if usuario.rol not in ROLES_ADMIN_TOTAL:raise HTTPException(status_code=403,detail="Se requiere permiso de administrador total.")
+    return usuario
+def require_admin_tecnico(usuario:Usuario=Depends(require_cliente))->Usuario:
+    if not es_admin_tecnico(usuario):raise HTTPException(status_code=403,detail="Se requiere permiso de administrador técnico.")
     return usuario

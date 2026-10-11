@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.security import require_admin, require_cliente
+from app.core.security import es_administrador, require_admin, require_cliente
 from app.database.session import get_db
 from app.models.notificacion import Notificacion
 from app.models.usuario import Usuario
@@ -62,6 +62,6 @@ def crear_campana_admin(
 @router.patch("/{notificacion_id}/leer",response_model=NotificacionResponse)
 def leer(notificacion_id:int,db:Session=Depends(get_db),usuario:Usuario=Depends(require_cliente)):
     item=db.get(Notificacion,notificacion_id)
-    permitida=item is not None and (item.usuario_id==usuario.id or (usuario.rol=="admin" and item.audiencia=="admin"))
+    permitida=item is not None and (item.usuario_id==usuario.id or (es_administrador(usuario) and item.audiencia=="admin"))
     if not permitida:raise HTTPException(status_code=404,detail="Notificación no encontrada.")
     item.leida=True;db.commit();db.refresh(item);return item

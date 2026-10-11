@@ -1,3 +1,5 @@
+import pytest
+
 def test_visitante_no_puede_usar_carrito(public_client):
     response = public_client.post("/api/carrito/calcular", json={"items": []})
     assert response.status_code == 401
@@ -13,7 +15,7 @@ def test_visitante_no_puede_ver_mis_pedidos(public_client):
     assert public_client.get("/api/pedidos/mios").status_code == 401
 
 
-def test_admin_operativo_no_accede_a_analitica_migracion_ni_configuracion(engine):
+def test_admin_operativo_no_accede_a_analitica_migracion_configuracion_ni_stock_por_talles(engine):
     from fastapi.testclient import TestClient
     from app.core.security import get_usuario_opcional
     from app.database.session import get_db
@@ -36,8 +38,25 @@ def test_admin_operativo_no_accede_a_analitica_migracion_ni_configuracion(engine
             assert operativa.get("/api/admin/trafico").status_code == 403
             assert operativa.get("/api/admin/migracion-wordpress/resumen").status_code == 403
             assert operativa.patch("/api/admin/configuracion/dux/modo", json={"habilitado": True}).status_code == 403
+            assert operativa.get("/api/admin/productos/stock-talles").status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+def test_admin_tecnico_es_el_unico_que_accede_a_migracion_y_configuracion():
+    from fastapi import HTTPException
+    from app.core.security import require_admin_tecnico, require_admin_total
+    from app.models.usuario import Usuario
+
+    admin = Usuario(id=10, email="admin@test.local", nombre="Admin", rol="admin", activo=True)
+    tecnico = Usuario(id=11, email="tecnico@test.local", nombre="Técnico", rol="admin_tecnico", activo=True)
+
+    assert require_admin_total(admin) is admin
+    assert require_admin_total(tecnico) is tecnico
+    assert require_admin_tecnico(tecnico) is tecnico
+    with pytest.raises(HTTPException) as error:
+        require_admin_tecnico(admin)
+    assert error.value.status_code == 403
 
 
 def test_registro_guarda_perfil_comercial(public_client, db):
@@ -109,3 +128,4 @@ def test_visitante_no_recibe_precios(public_client, db):
     response = public_client.get("/api/productos/")
     assert response.status_code == 200
     assert response.json()["items"][0]["precio_mayorista"] is None
+import pytest

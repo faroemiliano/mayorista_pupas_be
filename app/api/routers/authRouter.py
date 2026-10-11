@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.core.security import crear_token,hashear_password,require_cliente,verificar_password
+from app.core.security import crear_token,es_administrador,hashear_password,require_cliente,verificar_password
 from app.database.session import get_db
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
@@ -108,7 +108,7 @@ def login(data:LoginRequest,db:Session=Depends(get_db)):
         raise HTTPException(status_code=409,detail="MIGRACION_PASSWORD_REQUERIDA")
     if usuario is None or usuario.password_hash is None or not verificar_password(data.password,usuario.password_hash):raise HTTPException(status_code=401,detail="Email o contraseña incorrectos.")
     if not usuario.activo:raise HTTPException(status_code=403,detail="La cuenta está deshabilitada.")
-    if usuario.rol != "admin" and usuario.estado_registro != "aprobado":
+    if not es_administrador(usuario) and usuario.estado_registro != "aprobado":
         detalle = "Tu registro está pendiente de aprobación." if usuario.estado_registro == "pendiente" else "Tu registro fue rechazado. Contactate con la empresa."
         raise HTTPException(status_code=403,detail=detalle)
     if usuario.rol == "cliente" and not db.scalar(

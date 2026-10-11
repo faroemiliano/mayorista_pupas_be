@@ -158,7 +158,7 @@ def obtener_balance_compras_cliente(
 def cambiar_estado(usuario_id:int,data:EstadoRequest,db:Session=Depends(get_db)):
     if data.estado not in {"aprobado","rechazado"}:raise HTTPException(status_code=422,detail="Estado inválido.")
     usuario=db.get(Usuario,usuario_id)
-    if usuario is None or usuario.rol=="admin":raise HTTPException(status_code=404,detail="Cliente no encontrado.")
+    if usuario is None or usuario.rol != "cliente":raise HTTPException(status_code=404,detail="Cliente no encontrado.")
     usuario.estado_registro=data.estado;db.commit();db.refresh(usuario)
     titulo="Tu cuenta mayorista fue aprobada" if data.estado=="aprobado" else "Actualización de tu solicitud mayorista"
     mensaje="Ya podés ingresar, ver precios y realizar pedidos." if data.estado=="aprobado" else "Tu solicitud fue rechazada. Contactate con la empresa si necesitás más información."

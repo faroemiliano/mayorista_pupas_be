@@ -20,3 +20,4 @@ from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.variacion_producto import VariacionProducto
 from app.models.usuario_wordpress import UsuarioWordpress
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
+from app.models.resena_cliente import ResenaCliente

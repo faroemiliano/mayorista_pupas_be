@@ -58,7 +58,7 @@ def client(engine):
         google_sub="test-admin",
         email="admin@test.local",
         nombre="Admin Test",
-        rol="admin",
+        rol="admin_tecnico",
         activo=True,
     )
 

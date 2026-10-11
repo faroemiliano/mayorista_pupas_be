@@ -10,7 +10,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.core.security import get_usuario_opcional
+from app.core.security import es_administrador, get_usuario_opcional
 from app.models.usuario import Usuario
 
 from app.schemas.producto_schemas import (
@@ -81,7 +81,7 @@ def listar_productos(
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_usuario_opcional),
 ):
-    if not solo_habilitados and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
+    if not solo_habilitados and not es_administrador(usuario):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sólo un administrador puede ver productos ocultos.")
 
     return get_productos_service(
@@ -217,7 +217,7 @@ def obtener_producto_por_slug(
             detail="Producto no encontrado.",
         )
 
-    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
+    if not producto.visible_tienda and not es_administrador(usuario):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto
@@ -248,7 +248,7 @@ def obtener_producto(
             detail="Producto no encontrado.",
         )
 
-    if not producto.visible_tienda and (usuario is None or usuario.rol not in {"admin", "admin_operativo"}):
+    if not producto.visible_tienda and not es_administrador(usuario):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.")
 
     return producto

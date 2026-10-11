@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.core.security import require_admin, require_cliente
+from app.core.security import es_administrador, require_admin, require_cliente
 from app.models.usuario import Usuario
 from app.schemas.pedido_schemas import (
     PedidoCreateRequest,
@@ -75,7 +75,7 @@ def obtener_pedido(
         referencia,
         usuario.id,
         origen=origen,
-        puede_ver_todos=usuario.rol in {"admin", "admin_operativo"},
+        puede_ver_todos=es_administrador(usuario),
     )
     if pedido is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado.")

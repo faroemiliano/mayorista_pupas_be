@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import require_admin, require_cliente
+from app.core.security import es_administrador, require_admin, require_cliente
 from app.database.session import get_db
 from app.models.material_cliente import MaterialCliente
 from app.models.notificacion import Notificacion
@@ -69,14 +69,14 @@ def _notificar_nuevo_material(db: Session, cantidad: int, titulo: str) -> None:
 
 @router.get("/", response_model=list[MaterialClienteResponse])
 def listar_materiales(db: Session = Depends(get_db), usuario: Usuario = Depends(require_cliente)):
-    if usuario.rol != "admin" and usuario.estado_registro != "aprobado":
+    if not es_administrador(usuario) and usuario.estado_registro != "aprobado":
         raise HTTPException(status_code=403, detail="Tu cuenta debe estar aprobada para acceder al material.")
     return _listar(db)
 
 
 @router.get("/{material_id}/archivo")
 def obtener_archivo(material_id: int, descargar: bool = False, db: Session = Depends(get_db), usuario: Usuario = Depends(require_cliente)):
-    if usuario.rol != "admin" and usuario.estado_registro != "aprobado":
+    if not es_administrador(usuario) and usuario.estado_registro != "aprobado":
         raise HTTPException(status_code=403, detail="Tu cuenta debe estar aprobada para acceder al material.")
     material = db.get(MaterialCliente, material_id)
     if material is None:

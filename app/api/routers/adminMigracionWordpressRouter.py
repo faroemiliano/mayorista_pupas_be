@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.security import require_admin_total
+from app.core.security import require_admin_tecnico
 from app.core.config import settings
 from app.database.session import get_db
 from app.models.migracion_woocommerce import MigracionWooCommerce
@@ -39,7 +39,7 @@ from app.services.migracion_imagenes_r2_service import (
 router = APIRouter(
     prefix="/api/admin/migracion-wordpress",
     tags=["Administración - Migración WordPress"],
-    dependencies=[Depends(require_admin_total)],
+    dependencies=[Depends(require_admin_tecnico)],
 )
 
 

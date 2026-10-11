@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database.session import get_db
-from app.core.security import require_admin, require_admin_total
+from app.core.security import require_admin, require_admin_tecnico, require_admin_total
 from app.core.config import settings
 from app.schemas.admin_producto_schemas import ProductoAnaliticaResponse
 from app.models.producto import Producto
@@ -219,7 +219,7 @@ def eliminar_imagen(producto_id:int,imagen_id:int,background_tasks: BackgroundTa
     background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_eliminada)
 
 @router.get("/stock-talles")
-def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Query(20,ge=1,le=100),db:Session=Depends(get_db)):
+def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Query(20,ge=1,le=100),db:Session=Depends(get_db),_: object=Depends(require_admin_tecnico)):
     from app.models.producto import Producto
     query=select(Producto).options(selectinload(Producto.stocks),selectinload(Producto.stocks_talles))
     count=select(func.count(Producto.id))
@@ -231,7 +231,7 @@ def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Qu
     return {"items":[{"id":p.id,"codigo":p.dux_codigo,"nombre":p.nombre,"stock_dux":int(sumar_stock_fuente_activa(p.stocks)),"origen":next((s.origen for s in p.stocks_talles),"sin_configurar"),"talles":{s.talle:s.cantidad for s in p.stocks_talles}} for p in productos],"total":total,"page":page,"limit":limit,"total_paginas":((total+limit-1)//limit if total else 0)}
 
 @router.post("/{producto_id}/stock-talles")
-def guardar_stock_talles(producto_id:int,data:StockTallesRequest,db:Session=Depends(get_db)):
+def guardar_stock_talles(producto_id:int,data:StockTallesRequest,db:Session=Depends(get_db),_: object=Depends(require_admin_tecnico)):
     from app.models.producto import Producto
     from app.models.stock_talle_producto import StockTalleProducto
     from app.repositories.reserva_stock_repository import cantidades_reservadas_por_talle

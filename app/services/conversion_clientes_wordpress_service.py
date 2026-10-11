@@ -91,13 +91,13 @@ def convertir_clientes_wordpress(db: Session, progreso=None) -> dict:
             # ya terminó el cambio de clave en la nueva tienda.
             if (
                 usuario.google_sub is None
-                and usuario.rol != "admin"
+                and usuario.rol not in {"admin", "admin_tecnico"}
                 and usuario.password_hash is None
             ):
                 usuario.requiere_migracion_password = True
-            if usuario.rol != "admin" and nombre_wordpress and _debe_completar_nombre(usuario):
+            if usuario.rol not in {"admin", "admin_tecnico"} and nombre_wordpress and _debe_completar_nombre(usuario):
                 usuario.nombre = nombre_wordpress
-            if usuario.rol != "admin" and apellido_wordpress and not (usuario.apellido or "").strip():
+            if usuario.rol not in {"admin", "admin_tecnico"} and apellido_wordpress and not (usuario.apellido or "").strip():
                 usuario.apellido = apellido_wordpress
 
         usuario.telefono = usuario.telefono or _texto(facturacion.get("phone"))

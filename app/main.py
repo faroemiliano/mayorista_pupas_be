@@ -14,6 +14,7 @@ from app.api.routers.adminConfiguracionRouter import router as admin_configuraci
 from app.api.routers.adminMigracionWordpressRouter import router as admin_migracion_wordpress_router
 from app.api.routers.adminTraficoRouter import router as admin_trafico_router
 from app.api.routers.notificacionesRouter import router as notificaciones_router
+from app.api.routers.resenasRouter import router as resenas_router
 from app.api.routers.configuracionPublicaRouter import router as configuracion_publica_router
 from app.api.routers.materialesClientesRouter import router as materiales_clientes_router, admin_router as materiales_clientes_admin_router
 from app.api.routers.pedidosRouter import router as pedidos_router
@@ -50,6 +51,7 @@ app.include_router(admin_configuracion_router)
 app.include_router(admin_migracion_wordpress_router)
 app.include_router(admin_trafico_router)
 app.include_router(notificaciones_router)
+app.include_router(resenas_router)
 app.include_router(configuracion_publica_router)
 app.include_router(materiales_clientes_router)
 app.include_router(materiales_clientes_admin_router)
