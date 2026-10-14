@@ -73,7 +73,7 @@ def test_crear_pedido_guarda_totales_e_items(
         Notificacion.tipo == "reserva_pedido",
     ))
     assert aviso is not None
-    assert aviso.email_destino == "ana@example.com"
+    assert aviso.email_destino is None
     assert aviso.email_estado == "omitido"
     assert "quedaron reservadas" in aviso.mensaje
     assert "hasta la entrega" in aviso.mensaje
@@ -196,12 +196,7 @@ def test_admin_actualiza_estado_de_varios_pedidos_a_la_vez(client: TestClient, d
     assert db.get(Pedido, segundo["id"]).estado == "confirmado"
 
 
-def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient, db: Session, monkeypatch):
-    emails = []
-    monkeypatch.setattr(
-        "app.services.notificacion_service._enviar_email",
-        lambda destino, asunto, contenido: (emails.append((destino, asunto, contenido)) or ("enviado", None)),
-    )
+def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient, db: Session):
     historico = PedidoHistoricoWordpress(
         wordpress_id=7001, numero="7001", wordpress_customer_id=10,
         estado="completed", total=Decimal("12500"),
@@ -238,25 +233,21 @@ def test_admin_gestiona_estado_de_pedido_historico_wordpress(client: TestClient,
     db.refresh(historico)
     assert historico.estado == "completed"
     assert historico.estado_gestion == "contactado"
-    assert len(emails) == 0
-
     confirmado = client.patch(
         f"/api/admin/pedidos/{historico.id}/estado",
         json={"estado": "confirmado", "origen": "wordpress"},
     )
     assert confirmado.status_code == 200
-    assert len(emails) == 1
-    assert emails[0][0] == "maria@test.local"
-    assert "WP-7001" in emails[0][1]
-    assert "Completado" in emails[0][2]
-    assert "Hola María Pérez" in emails[0][2]
+    aviso = db.scalar(select(Notificacion).where(Notificacion.tipo == "estado_pedido"))
+    assert aviso is not None
+    assert aviso.email_estado == "omitido"
+    assert aviso.email_destino is None
 
     repetido = client.patch(
         f"/api/admin/pedidos/{historico.id}/estado",
         json={"estado": "confirmado", "origen": "wordpress"},
     )
     assert repetido.status_code == 200
-    assert len(emails) == 1
 
 
 def test_crear_pedido_reserva_stock_y_evitar_sobreventa(

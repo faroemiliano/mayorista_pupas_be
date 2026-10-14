@@ -68,7 +68,7 @@ def _notificar_estado_pedido(db: Session, *, codigo: str, estado: str, nombre: s
     notificar(
         db, audiencia="cliente", tipo="estado_pedido", titulo=asunto, mensaje=mensaje,
         usuario_id=usuario_id, pedido_id=pedido_id, email=email,
-        enviar_email=estado == "confirmado",
+        enviar_email=False,
     )
 
 
@@ -162,7 +162,7 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
     db.refresh(pedido)
     notificar(db,audiencia="admin",tipo="pedido_nuevo",titulo=f"Nuevo pedido {pedido.codigo}",
               mensaje=f"{pedido.cliente_nombre} realizó un pedido por ${pedido.total} con {pedido.cantidad_unidades} unidades.",
-              pedido_id=pedido.id,email=settings.EMAIL_ADMIN or None)
+              pedido_id=pedido.id, enviar_email=False)
     pedido_guardado = get_pedido(db, pedido.id) or pedido
     _notificar_reserva_pedido(db, pedido_guardado, usuario)
     return pedido_guardado

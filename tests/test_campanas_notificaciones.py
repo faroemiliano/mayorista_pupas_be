@@ -53,7 +53,7 @@ def test_admin_crea_campana_interna_para_clientes_aprobados(
     assert all(item.enlace_url is None for item in items)
 
 
-def test_email_promocional_solo_se_programa_con_consentimiento(db: Session):
+def test_campana_se_mantiene_dentro_de_la_plataforma(db: Session):
     acepta = _cliente(db, 1, True)
     rechaza = _cliente(db, 2, False)
     db.commit()
@@ -65,17 +65,16 @@ def test_email_promocional_solo_se_programa_con_consentimiento(db: Session):
         mensaje="Descuento especial por esta semana.",
         destinatarios="todos",
         usuario_ids=[],
-        enviar_email=True,
     )
 
     assert creadas == 2
-    assert emails == 1
+    assert emails == 0
     items = {
         item.usuario_id: item
         for item in db.scalars(select(Notificacion)).all()
     }
-    assert items[acepta.id].email_estado == "pendiente"
-    assert items[acepta.id].email_destino == acepta.email
+    assert items[acepta.id].email_estado == "omitido"
+    assert items[acepta.id].email_destino is None
     assert items[rechaza.id].email_estado == "omitido"
     assert items[rechaza.id].email_destino is None
 

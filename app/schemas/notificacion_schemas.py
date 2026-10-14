@@ -26,7 +26,6 @@ class CampanaNotificacionRequest(BaseModel):
     mensaje: str = Field(min_length=5, max_length=2000)
     destinatarios: Literal["todos", "seleccionados"] = "todos"
     usuario_ids: list[int] = Field(default_factory=list, max_length=500)
-    enviar_email: bool = False
 
 
 class CampanaNotificacionResponse(BaseModel):
