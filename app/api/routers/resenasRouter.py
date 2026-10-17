@@ -36,7 +36,7 @@ def _respuesta(resena: ResenaCliente, usuario: Usuario | None = None, incluir_em
 
 
 @router.get("/publicas", response_model=list[ResenaResponse])
-def listar_publicas(limit: int = Query(6, ge=1, le=12), db: Session = Depends(get_db)):
+def listar_publicas(limit: int = Query(100, ge=1, le=100), db: Session = Depends(get_db)):
     rows = db.execute(
         select(ResenaCliente, Usuario)
         .join(Usuario, Usuario.id == ResenaCliente.usuario_id)
