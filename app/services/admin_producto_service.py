@@ -3,7 +3,12 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.repositories.admin_producto_repository import get_analitica_productos, get_ranking_clientes, get_ventas_temporales
+from app.repositories.admin_producto_repository import (
+    get_analitica_productos,
+    get_ranking_clientes,
+    get_ventas_categorias_destacadas,
+    get_ventas_temporales,
+)
 
 
 MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
@@ -84,6 +89,29 @@ def _resumen_ventas(ventas: list[dict]) -> dict:
     }
 
 
+def _ventas_por_categoria_destacada(db: Session, desde: datetime | None, hasta: datetime | None) -> list[dict]:
+    categorias = {
+        "bikinis": {"slug": "bikinis", "categoria": "Bikinis", "unidades_vendidas": 0, "importe_vendido": Decimal("0"), "productos": []},
+        "pijamas": {"slug": "pijamas", "categoria": "Pijamas", "unidades_vendidas": 0, "importe_vendido": Decimal("0"), "productos": []},
+    }
+    for item in get_ventas_categorias_destacadas(db, desde, hasta):
+        categoria = categorias.get(str(item["categoria"]).casefold())
+        if categoria is None:
+            continue
+        categoria["categoria"] = item["categoria"]
+        unidades = int(item["unidades_vendidas"])
+        importe = Decimal(item["importe_vendido"])
+        categoria["unidades_vendidas"] += unidades
+        categoria["importe_vendido"] += importe
+        categoria["productos"].append({
+            "producto_id": item["producto_id"],
+            "nombre": item["nombre"],
+            "unidades_vendidas": unidades,
+            "importe_vendido": importe,
+        })
+    return list(categorias.values())
+
+
 def get_analitica_productos_service(
     db: Session,
     dias: int | None,
@@ -141,6 +169,7 @@ def get_analitica_productos_service(
         "serie_ventas": _crear_serie_ventas(db, desde, hasta, agrupacion),
         "mas_vendidos": mas_vendidos,
         "menos_vendidos": menos_vendidos,
+        "ventas_por_categoria": _ventas_por_categoria_destacada(db, desde, hasta_exclusivo),
         "mejores_clientes": get_ranking_clientes(db, desde, hasta_exclusivo, limit=10),
         "comparacion_anterior": comparacion_anterior,
     }

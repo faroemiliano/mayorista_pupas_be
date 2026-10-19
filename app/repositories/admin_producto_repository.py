@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.pedido import Pedido
 from app.models.pedido_item import PedidoItem
+from app.models.categoria import Categoria
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
@@ -128,6 +129,80 @@ def get_ventas_temporales(
         query_wordpress = query_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
     ventas = union_all(query_tienda, query_wordpress).subquery()
     query = select(ventas.c.creado_en, ventas.c.total, ventas.c.cantidad_unidades).order_by(ventas.c.creado_en)
+    return [dict(row) for row in db.execute(query).mappings().all()]
+
+
+def get_ventas_categorias_destacadas(
+    db: Session,
+    desde: datetime | None,
+    hasta: datetime | None = None,
+) -> list[dict]:
+    """Devuelve los modelos vendidos de las categorías principales.
+
+    No depende de que el producto siga habilitado hoy: una prenda que fue
+    deshabilitada igualmente forma parte de la venta histórica del período.
+    """
+    ventas_tienda = (
+        select(
+            PedidoItem.producto_id.label("producto_id"),
+            func.coalesce(func.sum(PedidoItem.cantidad), 0).label("unidades_vendidas"),
+            func.coalesce(func.sum(PedidoItem.subtotal), 0).label("importe_vendido"),
+        )
+        .join(Pedido, Pedido.id == PedidoItem.pedido_id)
+        .where(Pedido.estado != "cancelado")
+        .group_by(PedidoItem.producto_id)
+    )
+    if desde is not None:
+        ventas_tienda = ventas_tienda.where(Pedido.creado_en >= desde)
+    if hasta is not None:
+        ventas_tienda = ventas_tienda.where(Pedido.creado_en < hasta)
+
+    ventas_wordpress = (
+        select(
+            PedidoItemHistoricoWordpress.producto_id.label("producto_id"),
+            func.coalesce(func.sum(PedidoItemHistoricoWordpress.cantidad), 0).label("unidades_vendidas"),
+            func.coalesce(func.sum(PedidoItemHistoricoWordpress.total), 0).label("importe_vendido"),
+        )
+        .join(PedidoHistoricoWordpress, PedidoHistoricoWordpress.id == PedidoItemHistoricoWordpress.pedido_id)
+        .where(
+            PedidoHistoricoWordpress.estado != "cancelled",
+            PedidoItemHistoricoWordpress.producto_id.is_not(None),
+        )
+        .group_by(PedidoItemHistoricoWordpress.producto_id)
+    )
+    if desde is not None:
+        ventas_wordpress = ventas_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        ventas_wordpress = ventas_wordpress.where(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
+
+    ventas_union = union_all(ventas_tienda, ventas_wordpress).subquery()
+    ventas = (
+        select(
+            ventas_union.c.producto_id,
+            func.sum(ventas_union.c.unidades_vendidas).label("unidades_vendidas"),
+            func.sum(ventas_union.c.importe_vendido).label("importe_vendido"),
+        )
+        .group_by(ventas_union.c.producto_id)
+        .subquery()
+    )
+
+    query = (
+        select(
+            Categoria.slug.label("categoria_slug"),
+            Categoria.nombre.label("categoria"),
+            Producto.id.label("producto_id"),
+            Producto.nombre,
+            func.coalesce(ventas.c.unidades_vendidas, 0).label("unidades_vendidas"),
+            func.coalesce(ventas.c.importe_vendido, 0).label("importe_vendido"),
+        )
+        .join(Producto, Producto.categoria_id == Categoria.id)
+        .join(ventas, ventas.c.producto_id == Producto.id)
+        # La migración conservó categorías históricas y actuales con slugs
+        # distintos (por ejemplo ``bikinis`` y ``bikinis-wp-37``). El nombre
+        # es la identidad comercial común que permite agrupar ambas.
+        .where(func.lower(Categoria.nombre).in_(("bikinis", "pijamas")))
+        .order_by(Categoria.nombre, ventas.c.unidades_vendidas.desc(), ventas.c.importe_vendido.desc(), Producto.nombre)
+    )
     return [dict(row) for row in db.execute(query).mappings().all()]
 
 

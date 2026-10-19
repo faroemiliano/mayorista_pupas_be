@@ -52,6 +52,21 @@ class ClienteRankingResponse(BaseModel):
     ultima_compra: datetime | None = None
 
 
+class ProductoCategoriaVentaResponse(BaseModel):
+    producto_id: int
+    nombre: str
+    unidades_vendidas: int
+    importe_vendido: Decimal
+
+
+class CategoriaVentaResponse(BaseModel):
+    slug: str
+    categoria: str
+    unidades_vendidas: int
+    importe_vendido: Decimal
+    productos: list[ProductoCategoriaVentaResponse]
+
+
 class ProductoAnaliticaResponse(BaseModel):
     origen: str
     alcance: str
@@ -63,5 +78,6 @@ class ProductoAnaliticaResponse(BaseModel):
     serie_ventas: list[VentaTemporalResponse]
     mas_vendidos: list[ProductoVentaRankingResponse]
     menos_vendidos: list[ProductoVentaRankingResponse]
+    ventas_por_categoria: list[CategoriaVentaResponse]
     mejores_clientes: list[ClienteRankingResponse]
     comparacion_anterior: ComparacionPeriodoResponse | None = None
