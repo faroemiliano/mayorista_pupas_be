@@ -6,6 +6,7 @@ from app.core.security import get_usuario_opcional
 from app.main import app
 from app.models.portada_inicio import PortadaInicio
 from app.models.imagen_producto import ImagenProducto
+from app.models.categoria import Categoria
 from app.models.producto import Producto
 from app.models.usuario import Usuario
 
@@ -75,11 +76,13 @@ def test_admin_puede_reutilizar_una_imagen_r2_del_catalogo(client: TestClient, d
         "app.api.routers.portadaInicioRouter.settings.R2_PUBLIC_BASE_URL",
         "https://imagenes.pupasmayorista.com.ar",
     )
+    categoria = Categoria(nombre="Bikinis selector", slug="bikinis-selector")
     producto = Producto(
         dux_codigo="WEB-PORTADA-1",
         nombre="Bikini para portada",
         slug="bikini-para-portada",
         origen="web",
+        categoria=categoria,
     )
     producto.imagenes.append(
         ImagenProducto(
@@ -99,6 +102,11 @@ def test_admin_puede_reutilizar_una_imagen_r2_del_catalogo(client: TestClient, d
 
     assert response.status_code == 200
     assert response.json()["imagen_url"] == producto.imagenes[0].url
+
+    selector = client.get(f"/api/admin/portada/imagenes-producto?categoria_id={categoria.id}")
+    assert selector.status_code == 200
+    assert selector.json()["total"] == 1
+    assert selector.json()["items"][0]["id"] == producto.imagenes[0].id
 
 
 def test_operador_no_puede_cambiar_fotos_de_portada(client: TestClient):

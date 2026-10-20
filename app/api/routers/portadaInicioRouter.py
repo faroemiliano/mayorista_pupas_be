@@ -2,9 +2,9 @@ import base64
 import binascii
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
@@ -12,6 +12,7 @@ from app.core.security import require_admin_total
 from app.database.session import get_db
 from app.models.portada_inicio import PortadaInicio
 from app.models.imagen_producto import ImagenProducto
+from app.models.producto import Producto
 from app.models.usuario import Usuario
 from app.services.almacenamiento_imagenes_r2_service import (
     R2ImagenError,
@@ -117,6 +118,52 @@ def listar_portadas(db: Session = Depends(get_db)):
             for fila in filas
             if fila.producto is not None
         },
+    }
+
+
+@admin_router.get("/imagenes-producto")
+def listar_imagenes_de_catalogo(
+    categoria_id: int = Query(gt=0),
+    buscar: str = Query(default="", max_length=100),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=10),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_admin_total),
+):
+    """Selector liviano: devuelve exactamente una página de fotos del catálogo."""
+    filtros = [
+        Producto.categoria_id == categoria_id,
+        Producto.habilitado.is_(True),
+        Producto.visible_tienda.is_(True),
+        ImagenProducto.url.startswith(settings.R2_PUBLIC_BASE_URL.rstrip("/") + "/"),
+    ]
+    if buscar.strip():
+        filtros.append(Producto.nombre.ilike(f"%{buscar.strip()}%"))
+
+    base = select(ImagenProducto, Producto).join(Producto).where(*filtros)
+    total = db.scalar(
+        select(func.count(ImagenProducto.id)).join(Producto).where(*filtros)
+    ) or 0
+    filas = db.execute(
+        base.order_by(Producto.actualizado_en.desc(), ImagenProducto.orden, ImagenProducto.id)
+        .offset((page - 1) * limit)
+        .limit(limit)
+    ).all()
+    return {
+        "items": [
+            {
+                "id": imagen.id,
+                "url": imagen.url,
+                "producto_id": producto.id,
+                "producto_nombre": producto.nombre,
+                "producto_slug": producto.slug,
+            }
+            for imagen, producto in filas
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_paginas": max(1, (total + limit - 1) // limit),
     }
 
 
