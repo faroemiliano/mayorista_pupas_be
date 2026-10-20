@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.core.security import require_admin_total
@@ -86,6 +86,7 @@ def _guardar_portada(
     imagen_url: str,
     media_type: str,
     usuario_id: int,
+    producto_id: int | None = None,
 ) -> tuple[PortadaInicio, str | None]:
     portada = db.scalar(select(PortadaInicio).where(PortadaInicio.slide_id == slide_id))
     url_anterior = portada.imagen_url if portada else None
@@ -99,6 +100,7 @@ def _guardar_portada(
     else:
         portada.imagen_url = imagen_url
         portada.media_type = media_type
+    portada.producto_id = producto_id
     portada.actualizada_por_id = usuario_id
     db.commit()
     db.refresh(portada)
@@ -107,8 +109,15 @@ def _guardar_portada(
 
 @public_router.get("")
 def listar_portadas(db: Session = Depends(get_db)):
-    filas = db.scalars(select(PortadaInicio)).all()
-    return {"imagenes": {fila.slide_id: fila.imagen_url for fila in filas}}
+    filas = db.scalars(select(PortadaInicio).options(selectinload(PortadaInicio.producto))).all()
+    return {
+        "imagenes": {fila.slide_id: fila.imagen_url for fila in filas},
+        "productos": {
+            fila.slide_id: {"id": fila.producto.id, "slug": fila.producto.slug}
+            for fila in filas
+            if fila.producto is not None
+        },
+    }
 
 
 @admin_router.put("/{slide_id}")
@@ -136,6 +145,7 @@ def actualizar_portada(
         imagen_url=url,
         media_type=data.media_type,
         usuario_id=usuario.id,
+        producto_id=None,
     )
 
     if _es_portada_subida_a_r2(url_anterior):
@@ -169,6 +179,7 @@ def usar_imagen_de_producto_en_portada(
         imagen_url=imagen.url,
         media_type=imagen.media_type or "image/jpeg",
         usuario_id=usuario.id,
+        producto_id=imagen.producto_id,
     )
     if _es_portada_subida_a_r2(url_anterior):
         background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_anterior)
