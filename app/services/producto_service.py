@@ -242,6 +242,7 @@ def get_productos_service(
     db: Session,
     buscar: str | None = None,
     categoria_id: int | None = None,
+    categoria_nombre: str | None = None,
     subcategoria_id: int | None = None,
     marca_id: int | None = None,
     solo_habilitados: bool = True,
@@ -253,10 +254,11 @@ def get_productos_service(
     mostrar_precios: bool = True,
 ) -> dict:
 
-    productos, total = get_productos(
+    productos, total, stock_unidades_total = get_productos(
         db=db,
         buscar=buscar,
         categoria_id=categoria_id,
+        categoria_nombre=categoria_nombre,
         subcategoria_id=subcategoria_id,
         marca_id=marca_id,
         solo_habilitados=solo_habilitados,
@@ -289,4 +291,5 @@ def get_productos_service(
         "page": page,
         "limit": limit,
         "total_paginas": total_paginas,
+        "stock_unidades_total": stock_unidades_total,
     }

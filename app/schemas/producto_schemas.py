@@ -214,3 +214,4 @@ class ProductoListadoResponse(BaseModel):
     page: int
     limit: int
     total_paginas: int
+    stock_unidades_total: Decimal = Decimal("0")

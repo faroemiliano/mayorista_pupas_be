@@ -220,6 +220,7 @@ def test_filtrar_productos_del_catalogo(
     resultado = response.json()
 
     assert resultado["total"] == 1
+    assert resultado["stock_unidades_total"] == "4.00"
     assert resultado["items"][0]["dux_codigo"] == "P-001"
     assert resultado["items"][0]["precio_mayorista"] == "12000.00"
     assert resultado["items"][0]["precio_24_productos"] == "10500.00"
@@ -227,6 +228,63 @@ def test_filtrar_productos_del_catalogo(
     assert resultado["items"][0]["tiene_stock"] is True
     assert "precios" not in resultado["items"][0]
     assert "costo" not in resultado["items"][0]
+
+
+def test_filtrar_por_nombre_de_categoria_incluye_variantes_migradas(
+    client: TestClient,
+    db: Session,
+):
+    """El filtro comercial debe incluir categorías que sólo difieren en mayúsculas."""
+    ids = crear_catalogo(db)
+    categoria_principal = db.get(Categoria, ids["categoria_id"])
+    categoria_principal.nombre = "Bikinis"
+
+    categoria_migrada = Categoria(
+        dux_id=99,
+        nombre="BIKINIS",
+        slug="bikinis-migrada",
+        activo=True,
+    )
+    producto_deshabilitado = Producto(
+        dux_codigo="P-003",
+        nombre="Bikini de migración",
+        slug="bikini-migracion-p-003",
+        habilitado=False,
+        visible_tienda=False,
+        categoria=categoria_migrada,
+    )
+    producto_deshabilitado.stocks.append(
+        StockProducto(
+            dux_id_deposito=1,
+            nombre_deposito="Central",
+            stock_real=6,
+            stock_reservado=0,
+            stock_disponible=6,
+        )
+    )
+    db.add_all([categoria_migrada, producto_deshabilitado])
+    db.commit()
+
+    disponibles_web = client.get(
+        "/api/productos/",
+        params={
+            "categoria_nombre": "bikinis",
+            "con_stock": True,
+        },
+    )
+    total_incluyendo_deshabilitados = client.get(
+        "/api/productos/",
+        params={
+            "categoria_nombre": "bikinis",
+            "con_stock": True,
+            "solo_habilitados": False,
+        },
+    )
+
+    assert disponibles_web.status_code == 200
+    assert disponibles_web.json()["stock_unidades_total"] == "4.00"
+    assert total_incluyendo_deshabilitados.status_code == 200
+    assert total_incluyendo_deshabilitados.json()["stock_unidades_total"] == "10.00"
 
 
 def test_catalogo_usa_solo_deposito_dux_al_activar_fuente_maestra(

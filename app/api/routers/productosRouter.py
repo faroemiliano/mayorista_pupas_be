@@ -49,6 +49,12 @@ def listar_productos(
         gt=0,
     ),
 
+    categoria_nombre: str | None = Query(
+        default=None,
+        min_length=2,
+        max_length=100,
+    ),
+
     subcategoria_id: int | None = Query(
         default=None,
         gt=0,
@@ -88,6 +94,7 @@ def listar_productos(
         db=db,
         buscar=buscar,
         categoria_id=categoria_id,
+        categoria_nombre=categoria_nombre,
         subcategoria_id=subcategoria_id,
         marca_id=marca_id,
         solo_habilitados=solo_habilitados,

@@ -9,6 +9,7 @@ from sqlalchemy.orm import (
     Session,
     selectinload,
 )
+from decimal import Decimal
 
 from app.models.categoria import Categoria
 from app.models.marca import Marca
@@ -176,6 +177,7 @@ def get_productos(
     db: Session,
     buscar: str | None = None,
     categoria_id: int | None = None,
+    categoria_nombre: str | None = None,
     subcategoria_id: int | None = None,
     marca_id: int | None = None,
     solo_habilitados: bool = True,
@@ -184,7 +186,7 @@ def get_productos(
     page: int = 1,
     limit: int = 20,
     orden: str = "nombre_asc",
-) -> tuple[list[Producto], int]:
+) -> tuple[list[Producto], int, Decimal]:
 
     # =====================================================
     # QUERY PRINCIPAL
@@ -269,6 +271,13 @@ def get_productos(
             )
         )
 
+    if categoria_nombre and categoria_nombre.strip():
+        filtro = Producto.categoria.has(
+            func.lower(Categoria.nombre) == categoria_nombre.strip().lower()
+        )
+        query = query.where(filtro)
+        count_query = count_query.where(filtro)
+
     # =====================================================
     # SUBCATEGORÍA
     # =====================================================
@@ -315,6 +324,7 @@ def get_productos(
 # STOCK
 # =====================================================
 
+    stock_efectivo = None
     if con_stock is not None:
         stock_totales = (
             select(
@@ -500,6 +510,15 @@ def get_productos(
     # EJECUCIÓN
     # =====================================================
 
+    stock_unidades_total = Decimal("0")
+    if con_stock is True and stock_efectivo is not None:
+        stock_unidades_total = db.scalar(
+            count_query.with_only_columns(
+                func.coalesce(func.sum(stock_efectivo), 0),
+                maintain_column_froms=True,
+            )
+        ) or Decimal("0")
+
     productos = list(
         db.scalars(
             query
@@ -513,4 +532,4 @@ def get_productos(
         or 0
     )
 
-    return productos, total
+    return productos, total, Decimal(stock_unidades_total)
