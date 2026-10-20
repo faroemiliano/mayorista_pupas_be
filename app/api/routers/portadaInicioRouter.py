@@ -16,6 +16,8 @@ from app.models.producto import Producto
 from app.models.usuario import Usuario
 from app.services.almacenamiento_imagenes_r2_service import (
     R2ImagenError,
+    confirmar_video_portada_en_r2,
+    crear_carga_directa_video_portada,
     eliminar_imagen_r2_si_corresponde,
     subir_imagen_portada_a_r2,
 )
@@ -31,6 +33,8 @@ IMAGENES_EDITABLES = frozenset({
     "coleccion-pijamas-2",
 })
 
+VIDEOS_EDITABLES = frozenset({"video-bikinis", "video-pijamas"})
+
 public_router = APIRouter(prefix="/api/portada", tags=["Portada"])
 admin_router = APIRouter(prefix="/api/admin/portada", tags=["Administración - Portada"])
 
@@ -43,6 +47,16 @@ class ImagenPortadaRequest(BaseModel):
 
 class ImagenProductoPortadaRequest(BaseModel):
     imagen_id: int = Field(gt=0)
+
+
+class VideoCargaRequest(BaseModel):
+    nombre: str = Field(min_length=1, max_length=180)
+    media_type: str = Field(pattern=r"^video/mp4$")
+    tamano: int = Field(gt=0, le=50 * 1024 * 1024)
+
+
+class VideoConfirmacionRequest(BaseModel):
+    clave: str = Field(min_length=20, max_length=500)
 
 
 def _validar_imagen(data: ImagenPortadaRequest) -> bytes:
@@ -62,8 +76,8 @@ def _validar_imagen(data: ImagenPortadaRequest) -> bytes:
     return contenido
 
 
-def _es_portada_subida_a_r2(url: str | None) -> bool:
-    """Sólo las portadas cargadas desde PC son propiedad de esta sección.
+def _es_recurso_sitio_subido_a_r2(url: str | None) -> bool:
+    """Sólo los recursos propios del inicio son eliminables desde esta sección.
 
     Una foto de catálogo puede compartirse como portada. En ese caso no debe
     borrarse del bucket al cambiar la portada, porque sigue perteneciendo al
@@ -76,7 +90,10 @@ def _es_portada_subida_a_r2(url: str | None) -> bool:
     return (
         actual.scheme == "https"
         and actual.hostname == base.hostname
-        and actual.path.startswith("/pupas/sitio/portada/")
+        and (
+            actual.path.startswith("/pupas/sitio/portada/")
+            or actual.path.startswith("/pupas/sitio/videos/")
+        )
     )
 
 
@@ -195,7 +212,7 @@ def actualizar_portada(
         producto_id=None,
     )
 
-    if _es_portada_subida_a_r2(url_anterior):
+    if _es_recurso_sitio_subido_a_r2(url_anterior):
         background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_anterior)
     return {"slide_id": portada.slide_id, "imagen_url": portada.imagen_url}
 
@@ -228,6 +245,52 @@ def usar_imagen_de_producto_en_portada(
         usuario_id=usuario.id,
         producto_id=imagen.producto_id,
     )
-    if _es_portada_subida_a_r2(url_anterior):
+    if _es_recurso_sitio_subido_a_r2(url_anterior):
+        background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_anterior)
+    return {"slide_id": portada.slide_id, "imagen_url": portada.imagen_url}
+
+
+@admin_router.post("/{video_id}/video/carga")
+def preparar_carga_video_portada(
+    video_id: str,
+    data: VideoCargaRequest,
+    usuario: Usuario = Depends(require_admin_total),
+):
+    if video_id not in VIDEOS_EDITABLES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "El video seleccionado no existe.")
+    try:
+        return crear_carga_directa_video_portada(
+            video_id=video_id,
+            media_type=data.media_type,
+            tamano=data.tamano,
+        )
+    except R2ImagenError as error:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from error
+
+
+@admin_router.put("/{video_id}/video/confirmar")
+def confirmar_carga_video_portada(
+    video_id: str,
+    data: VideoConfirmacionRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_admin_total),
+):
+    if video_id not in VIDEOS_EDITABLES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "El video seleccionado no existe.")
+    try:
+        url = confirmar_video_portada_en_r2(video_id=video_id, clave=data.clave)
+    except R2ImagenError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+    portada, url_anterior = _guardar_portada(
+        db=db,
+        slide_id=video_id,
+        imagen_url=url,
+        media_type="video/mp4",
+        usuario_id=usuario.id,
+        producto_id=None,
+    )
+    if _es_recurso_sitio_subido_a_r2(url_anterior):
         background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_anterior)
     return {"slide_id": portada.slide_id, "imagen_url": portada.imagen_url}

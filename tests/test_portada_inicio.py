@@ -109,6 +109,33 @@ def test_admin_puede_reutilizar_una_imagen_r2_del_catalogo(client: TestClient, d
     assert selector.json()["items"][0]["id"] == producto.imagenes[0].id
 
 
+def test_admin_prepara_y_confirma_la_carga_directa_de_un_video(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.routers.portadaInicioRouter.crear_carga_directa_video_portada",
+        lambda **_: {
+            "clave": "pupas/sitio/videos/video-bikinis/archivo.mp4",
+            "upload_url": "https://r2.example/upload",
+            "video_url": "https://imagenes.pupasmayorista.com.ar/pupas/sitio/videos/video-bikinis/archivo.mp4",
+        },
+    )
+    preparacion = client.post(
+        "/api/admin/portada/video-bikinis/video/carga",
+        json={"nombre": "campania.mp4", "media_type": "video/mp4", "tamano": 1024},
+    )
+    assert preparacion.status_code == 200
+
+    monkeypatch.setattr(
+        "app.api.routers.portadaInicioRouter.confirmar_video_portada_en_r2",
+        lambda **_: "https://imagenes.pupasmayorista.com.ar/pupas/sitio/videos/video-bikinis/archivo.mp4",
+    )
+    confirmacion = client.put(
+        "/api/admin/portada/video-bikinis/video/confirmar",
+        json={"clave": preparacion.json()["clave"]},
+    )
+    assert confirmacion.status_code == 200
+    assert confirmacion.json()["slide_id"] == "video-bikinis"
+
+
 def test_operador_no_puede_cambiar_fotos_de_portada(client: TestClient):
     app.dependency_overrides[get_usuario_opcional] = lambda: Usuario(
         id=2,
