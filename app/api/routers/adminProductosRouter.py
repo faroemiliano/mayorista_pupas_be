@@ -205,6 +205,7 @@ def elegir_imagen_principal(producto_id:int,imagen_id:int,db:Session=Depends(get
 @router.delete("/{producto_id}/imagenes/{imagen_id}",status_code=204)
 def eliminar_imagen(producto_id:int,imagen_id:int,background_tasks: BackgroundTasks,db:Session=Depends(get_db)):
     from app.models.imagen_producto import ImagenProducto
+    from app.models.portada_inicio import PortadaInicio
     from app.models.producto import Producto
     producto=db.scalar(select(Producto).options(selectinload(Producto.imagenes)).where(Producto.id==producto_id))
     imagen=next((i for i in producto.imagenes if i.id==imagen_id),None) if producto else None
@@ -215,8 +216,14 @@ def eliminar_imagen(producto_id:int,imagen_id:int,background_tasks: BackgroundTa
         siguiente=restantes[0] if restantes else None
         if siguiente:siguiente.principal=True
         producto.imagen_url=siguiente.url if siguiente else None
+    sigue_en_portada = db.scalar(
+        select(PortadaInicio.id).where(PortadaInicio.imagen_url == url_eliminada)
+    ) is not None
     db.commit()
-    background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_eliminada)
+    # Una imagen compartida con la portada debe conservarse en R2 aunque se
+    # quite del producto. De ese modo nunca se rompe la imagen del inicio.
+    if not sigue_en_portada:
+        background_tasks.add_task(eliminar_imagen_r2_si_corresponde, url_eliminada)
 
 @router.get("/stock-talles")
 def listar_stock_talles(buscar:str|None=None,page:int=Query(1,ge=1),limit:int=Query(20,ge=1,le=100),db:Session=Depends(get_db),_: object=Depends(require_admin_tecnico)):

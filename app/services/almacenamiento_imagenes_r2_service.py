@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from urllib.parse import quote
+from uuid import uuid4
 
 from app.core.config import settings
 from app.services.migracion_imagenes_cloudinary_service import (
@@ -89,6 +90,25 @@ def subir_imagen_producto_a_r2(
         # boto3 puede no estar disponible al importar este módulo en una
         # instalación antigua; la excepción se transforma en un error claro.
         raise R2ImagenError("No se pudo guardar la imagen en R2.") from error
+    return url_publica_r2(clave)
+
+
+def subir_imagen_portada_a_r2(*, contenido: bytes, slide_id: str, media_type: str) -> str:
+    """Guarda una portada del inicio únicamente en el almacenamiento propio R2."""
+    extension = _EXTENSION_POR_MEDIA_TYPE.get(media_type)
+    if extension is None:
+        raise R2ImagenError("El formato de imagen no está permitido para R2.")
+    clave = f"pupas/sitio/portada/{slide_id}/{uuid4().hex}.{extension}"
+    try:
+        _cliente_r2().put_object(
+            Bucket=settings.R2_BUCKET_NAME,
+            Key=clave,
+            Body=contenido,
+            ContentType=media_type,
+            CacheControl="public, max-age=31536000, immutable",
+        )
+    except Exception as error:
+        raise R2ImagenError("No se pudo guardar la portada en R2.") from error
     return url_publica_r2(clave)
 
 

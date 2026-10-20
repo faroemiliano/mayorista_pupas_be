@@ -16,6 +16,7 @@ from app.api.routers.adminTraficoRouter import router as admin_trafico_router
 from app.api.routers.notificacionesRouter import router as notificaciones_router
 from app.api.routers.resenasRouter import router as resenas_router
 from app.api.routers.configuracionPublicaRouter import router as configuracion_publica_router
+from app.api.routers.portadaInicioRouter import admin_router as portada_admin_router, public_router as portada_public_router
 from app.api.routers.materialesClientesRouter import router as materiales_clientes_router, admin_router as materiales_clientes_admin_router
 from app.api.routers.pedidosRouter import router as pedidos_router
 from app.api.routers.productosRouter import router as productos_router
@@ -53,6 +54,8 @@ app.include_router(admin_trafico_router)
 app.include_router(notificaciones_router)
 app.include_router(resenas_router)
 app.include_router(configuracion_publica_router)
+app.include_router(portada_public_router)
+app.include_router(portada_admin_router)
 app.include_router(materiales_clientes_router)
 app.include_router(materiales_clientes_admin_router)
 
