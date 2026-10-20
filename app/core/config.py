@@ -100,8 +100,18 @@ class Settings(BaseSettings):
     def wordpress_source_url(self) -> str:
         return (self.WORDPRESS_ORIGIN_URL or self.WOOCOMMERCE_URL).rstrip("/")
     GOOGLE_CLIENT_ID: str = ""
-    AUTH_SECRET_KEY: str = "cambiar-esta-clave-en-produccion-pupas-2026"
+    AUTH_SECRET_KEY: str
     AUTH_TOKEN_MINUTES: int = 10080
+
+    @field_validator("AUTH_SECRET_KEY")
+    @classmethod
+    def validar_auth_secret_key(cls, value: str) -> str:
+        secret = value.strip()
+        if secret == "cambiar-esta-clave-en-produccion-pupas-2026" or len(secret) < 32:
+            raise ValueError(
+                "AUTH_SECRET_KEY debe ser una clave aleatoria de al menos 32 caracteres."
+            )
+        return secret
 
     DUX_LISTA_PRECIO_MAYORISTA_ID: int = 4710
     DUX_LISTA_PRECIO_24_ID: int = 43406
