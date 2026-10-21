@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 from typing import Literal
+from zoneinfo import ZoneInfo
 from app.core.security import require_admin
 from app.database.session import get_db
 from app.models.usuario import Usuario
@@ -55,19 +56,21 @@ def _combinar_resumenes(*resumenes: dict) -> dict:
     }
 
 
-def _ultima_compra_cliente(db: Session, usuario_id: int) -> datetime | None:
+def _ultima_compra_cliente(
+    db: Session, usuario_id: int, anterior_a: datetime | None = None
+) -> datetime | None:
     """Última compra válida entre la tienda nueva y el historial migrado."""
-    ultima_tienda = db.scalar(
-        select(func.max(Pedido.creado_en)).where(
-            Pedido.usuario_id == usuario_id,
-            Pedido.estado != "cancelado",
-        )
-    )
+    filtros_tienda = [Pedido.usuario_id == usuario_id, Pedido.estado != "cancelado"]
+    filtros_wordpress = [
+        PedidoHistoricoWordpress.usuario_id == usuario_id,
+        PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
+    ]
+    if anterior_a is not None:
+        filtros_tienda.append(Pedido.creado_en < anterior_a)
+        filtros_wordpress.append(PedidoHistoricoWordpress.creado_en_wordpress < anterior_a)
+    ultima_tienda = db.scalar(select(func.max(Pedido.creado_en)).where(*filtros_tienda))
     ultima_wordpress = db.scalar(
-        select(func.max(PedidoHistoricoWordpress.creado_en_wordpress)).where(
-            PedidoHistoricoWordpress.usuario_id == usuario_id,
-            PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
-        )
+        select(func.max(PedidoHistoricoWordpress.creado_en_wordpress)).where(*filtros_wordpress)
     )
     fechas = [fecha for fecha in (ultima_tienda, ultima_wordpress) if fecha is not None]
     if not fechas:
@@ -79,6 +82,11 @@ def _ultima_compra_cliente(db: Session, usuario_id: int) -> datetime | None:
     if ultima.tzinfo is None:
         return ultima.replace(tzinfo=timezone.utc)
     return ultima.astimezone(timezone.utc)
+
+
+def _inicio_hoy_argentina_en_utc() -> datetime:
+    ahora_argentina = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+    return ahora_argentina.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 
 @router.get("/paginados")
@@ -176,6 +184,9 @@ def obtener_balance_compras_cliente(
         "acumulado": acumulado,
         "periodo": periodo,
         "ultima_compra": _ultima_compra_cliente(db, usuario_id),
+        "ultima_compra_anterior": _ultima_compra_cliente(
+            db, usuario_id, anterior_a=_inicio_hoy_argentina_en_utc()
+        ),
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "alcance": "Incluye pedidos de la tienda y el historial migrado de WordPress; excluye cancelados, reembolsados y fallidos.",
