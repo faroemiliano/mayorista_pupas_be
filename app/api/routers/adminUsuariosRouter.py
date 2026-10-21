@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 from typing import Literal
-from zoneinfo import ZoneInfo
 from app.core.security import require_admin
 from app.database.session import get_db
 from app.models.usuario import Usuario
@@ -82,11 +81,6 @@ def _ultima_compra_cliente(
     if ultima.tzinfo is None:
         return ultima.replace(tzinfo=timezone.utc)
     return ultima.astimezone(timezone.utc)
-
-
-def _inicio_hoy_argentina_en_utc() -> datetime:
-    ahora_argentina = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
-    return ahora_argentina.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 
 @router.get("/paginados")
@@ -178,15 +172,17 @@ def obtener_balance_compras_cliente(
         _resumen_compras_tienda(db, usuario_id, desde, hasta),
         _resumen_compras_wordpress(db, usuario_id, desde, hasta),
     )
+    ultima_compra = _ultima_compra_cliente(db, usuario_id)
+
     return {
         "cliente_id": usuario.id,
         "cliente": f"{usuario.nombre} {usuario.apellido}".strip(),
         "acumulado": acumulado,
         "periodo": periodo,
-        "ultima_compra": _ultima_compra_cliente(db, usuario_id),
+        "ultima_compra": ultima_compra,
         "ultima_compra_anterior": _ultima_compra_cliente(
-            db, usuario_id, anterior_a=_inicio_hoy_argentina_en_utc()
-        ),
+            db, usuario_id, anterior_a=ultima_compra
+        ) if ultima_compra else None,
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "alcance": "Incluye pedidos de la tienda y el historial migrado de WordPress; excluye cancelados, reembolsados y fallidos.",

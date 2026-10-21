@@ -18,11 +18,7 @@ def _pedido(codigo: str, usuario_id: int, total: str, unidades: int, creado_en: 
     )
 
 
-def test_balance_compras_cliente_incluye_tienda_wordpress_y_filtros_de_fecha(client: TestClient, db: Session, monkeypatch):
-    monkeypatch.setattr(
-        "app.api.routers.adminUsuariosRouter._inicio_hoy_argentina_en_utc",
-        lambda: datetime(2026, 10, 2, tzinfo=timezone.utc),
-    )
+def test_balance_compras_cliente_incluye_tienda_wordpress_y_filtros_de_fecha(client: TestClient, db: Session):
     usuario = Usuario(email="cliente@test.local", nombre="Cliente", apellido="Prueba", rol="cliente", estado_registro="aprobado")
     db.add(usuario)
     db.flush()
