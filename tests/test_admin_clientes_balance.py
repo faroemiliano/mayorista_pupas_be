@@ -39,6 +39,7 @@ def test_balance_compras_cliente_incluye_tienda_wordpress_y_filtros_de_fecha(cli
 
     assert response.status_code == 200, response.text
     assert response.json()["acumulado"] == {"pedidos": 2, "unidades": 7, "importe": 450.0}
+    assert response.json()["ultima_compra"] == "2026-10-02T12:00:00+00:00"
 
     filtrado = client.get(f"/api/admin/usuarios/{usuario.id}/balance-compras", params={"fecha_desde": "2026-09-01", "fecha_hasta": "2026-09-30"})
     assert filtrado.status_code == 200, filtrado.text

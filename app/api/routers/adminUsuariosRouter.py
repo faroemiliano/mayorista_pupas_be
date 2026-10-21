@@ -55,6 +55,32 @@ def _combinar_resumenes(*resumenes: dict) -> dict:
     }
 
 
+def _ultima_compra_cliente(db: Session, usuario_id: int) -> datetime | None:
+    """Última compra válida entre la tienda nueva y el historial migrado."""
+    ultima_tienda = db.scalar(
+        select(func.max(Pedido.creado_en)).where(
+            Pedido.usuario_id == usuario_id,
+            Pedido.estado != "cancelado",
+        )
+    )
+    ultima_wordpress = db.scalar(
+        select(func.max(PedidoHistoricoWordpress.creado_en_wordpress)).where(
+            PedidoHistoricoWordpress.usuario_id == usuario_id,
+            PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
+        )
+    )
+    fechas = [fecha for fecha in (ultima_tienda, ultima_wordpress) if fecha is not None]
+    if not fechas:
+        return None
+    ultima = max(fechas)
+    # PostgreSQL conserva zona horaria; SQLite de pruebas puede devolver una
+    # fecha sin zona. La API siempre expone UTC para que el navegador muestre
+    # correctamente fecha y hora local.
+    if ultima.tzinfo is None:
+        return ultima.replace(tzinfo=timezone.utc)
+    return ultima.astimezone(timezone.utc)
+
+
 @router.get("/paginados")
 def listar_clientes_paginados(
     estado: Literal["pendiente", "aprobado", "rechazado"] | None = Query(default=None),
@@ -149,6 +175,7 @@ def obtener_balance_compras_cliente(
         "cliente": f"{usuario.nombre} {usuario.apellido}".strip(),
         "acumulado": acumulado,
         "periodo": periodo,
+        "ultima_compra": _ultima_compra_cliente(db, usuario_id),
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "alcance": "Incluye pedidos de la tienda y el historial migrado de WordPress; excluye cancelados, reembolsados y fallidos.",
