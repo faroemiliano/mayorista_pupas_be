@@ -7,13 +7,14 @@ from app.models.usuario import Usuario
 
 def notificar(db: Session, *, audiencia: str, tipo: str, titulo: str, mensaje: str,
               usuario_id: int | None = None, pedido_id: int | None = None,
-              email: str | None = None, enviar_email: bool = False) -> Notificacion:
+              email: str | None = None, enviar_email: bool = False,
+              enlace_url: str | None = None) -> Notificacion:
     # Las notificaciones comerciales y de pedidos quedan dentro de la plataforma.
     # El único email permitido es el de recuperación de contraseña, gestionado
     # directamente por authRouter.
     del email, enviar_email
     notificacion = Notificacion(usuario_id=usuario_id, pedido_id=pedido_id, audiencia=audiencia,
-                                tipo=tipo, titulo=titulo, mensaje=mensaje,
+                                tipo=tipo, titulo=titulo, mensaje=mensaje, enlace_url=enlace_url,
                                 email_destino=None, email_estado="omitido")
     db.add(notificacion)
     db.commit()

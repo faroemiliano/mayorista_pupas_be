@@ -13,6 +13,7 @@ from app.schemas.notificacion_schemas import (
     NotificacionesResponse,
 )
 from app.services.notificacion_service import crear_campana
+from app.services.resumen_semanal_ventas_service import crear_resumen_semanal_si_corresponde
 
 
 router=APIRouter(prefix="/api/notificaciones",tags=["Notificaciones"])
@@ -28,6 +29,7 @@ def mias(db:Session=Depends(get_db),usuario:Usuario=Depends(require_cliente)):
 
 @router.get("/admin",response_model=NotificacionesResponse)
 def admin(db:Session=Depends(get_db),usuario:Usuario=Depends(require_admin)):
+    crear_resumen_semanal_si_corresponde(db)
     return _listar(db,Notificacion.audiencia=="admin")
 
 
