@@ -100,6 +100,7 @@ class PedidoResponse(BaseModel):
 class PedidoListadoResponse(BaseModel):
     items: list[PedidoResponse]
     total: int
+    importe_total: Decimal = Decimal("0")
     conteos_estado: dict[str, int] = Field(default_factory=dict)
     page: int
     limit: int

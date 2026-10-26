@@ -167,6 +167,7 @@ def test_admin_lista_y_actualiza_estado_del_pedido(
     )
     assert listado.status_code == 200
     assert listado.json()["total"] == 1
+    assert listado.json()["importe_total"] == pedido["total"]
 
     actualizado = client.patch(
         f"/api/admin/pedidos/{pedido['id']}/estado",

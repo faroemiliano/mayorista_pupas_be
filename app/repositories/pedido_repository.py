@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import String, and_, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, selectinload
@@ -164,7 +165,7 @@ def get_referencias_pedidos_admin(
     fecha_hasta: datetime | None = None,
     origen: str = "todos",
     orden: str = "fecha_desc",
-) -> tuple[list[tuple[str, int]], int]:
+) -> tuple[list[tuple[str, int]], int, Decimal]:
     consultas = []
     if origen in ("todos", "tienda"):
         tienda = select(
@@ -223,6 +224,9 @@ def get_referencias_pedidos_admin(
 
     combinada = union_all(*consultas).subquery()
     total = db.scalar(select(func.count()).select_from(combinada)) or 0
+    importe_total = db.scalar(
+        select(func.coalesce(func.sum(combinada.c.total), 0))
+    ) or 0
     ordenamiento = {
         "fecha_desc": (combinada.c.fecha.desc(), combinada.c.id.desc()),
         "total_desc": (combinada.c.total.desc(), combinada.c.fecha.desc(), combinada.c.id.desc()),
@@ -236,7 +240,7 @@ def get_referencias_pedidos_admin(
         .offset((page - 1) * limit)
         .limit(limit)
     ).all()
-    return [(fila.origen, fila.id) for fila in filas], total
+    return [(fila.origen, fila.id) for fila in filas], total, importe_total
 
 
 def get_conteos_estado_pedidos_admin(

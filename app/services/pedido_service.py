@@ -325,7 +325,7 @@ def get_pedidos_admin_service(
     zona_local = ZoneInfo("America/Argentina/Buenos_Aires")
     desde_dt = datetime.combine(fecha_desde, time.min, zona_local) if fecha_desde else None
     hasta_dt = datetime.combine(fecha_hasta + timedelta(days=1), time.min, zona_local) if fecha_hasta else None
-    referencias, total = get_referencias_pedidos_admin(
+    referencias, total, importe_total = get_referencias_pedidos_admin(
         db, estado, page, limit, buscar, desde_dt, hasta_dt, origen, orden,
     )
     conteos_estado = get_conteos_estado_pedidos_admin(
@@ -336,7 +336,7 @@ def get_pedidos_admin_service(
         _serializar_pedido_historico(pedido) if referencia[0] == "wordpress" else pedido
         for referencia, pedido in zip(referencias, pedidos)
     ]
-    return {"items": items, "total": total, "page": page, "limit": limit,
+    return {"items": items, "total": total, "importe_total": importe_total, "page": page, "limit": limit,
             "conteos_estado": conteos_estado,
             "total_paginas": ceil(total / limit) if total else 0}
 
