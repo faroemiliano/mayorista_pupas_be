@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from io import BytesIO
 from urllib.parse import unquote, urlsplit
 
@@ -18,13 +19,75 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.imagen_producto import ImagenProducto
+from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
+from app.database.session import SessionLocal
 from app.services.almacenamiento_imagenes_r2_service import _cliente_r2, r2_imagenes_configurado
+from app.services.migracion_woocommerce_service import _guardar
 from app.services.procesamiento_imagenes_service import ImagenInvalidaError, procesar_imagen_catalogo
 
 
 UMBRAL_PESADO = 1 * 1024 * 1024
 UMBRALES = (1, 2, 5, 8)
+TIPO_ESTADO = "diagnostico_imagenes_r2"
+ID_ESTADO = "catalogo"
+
+
+def _estado(db: Session, **cambios) -> dict:
+    fila = db.scalar(select(MigracionWooCommerce).where(
+        MigracionWooCommerce.tipo == TIPO_ESTADO,
+        MigracionWooCommerce.id_externo == ID_ESTADO,
+    ))
+    datos = dict(fila.datos) if fila else {}
+    datos.update(cambios)
+    _guardar(db, TIPO_ESTADO, ID_ESTADO, datos)
+    return datos
+
+
+def obtener_estado_diagnostico_imagenes_r2(db: Session) -> dict:
+    """Estado persistente del último análisis, sin tocar el catálogo."""
+    fila = db.scalar(select(MigracionWooCommerce).where(
+        MigracionWooCommerce.tipo == TIPO_ESTADO,
+        MigracionWooCommerce.id_externo == ID_ESTADO,
+    ))
+    if fila is None:
+        return {"estado": "pendiente", "resultado": None, "error": None}
+    return dict(fila.datos)
+
+
+def preparar_diagnostico_imagenes_r2(db: Session) -> dict:
+    actual = obtener_estado_diagnostico_imagenes_r2(db)
+    if actual.get("estado") == "en_progreso":
+        raise ValueError("El diagnóstico de imágenes ya está en progreso.")
+    return _estado(
+        db,
+        estado="en_progreso",
+        resultado=None,
+        error=None,
+        iniciada_en=datetime.now(timezone.utc).isoformat(),
+        finalizada_en=None,
+    )
+
+
+def ejecutar_diagnostico_imagenes_r2_background() -> None:
+    """Ejecuta el análisis fuera de la petición HTTP y persiste sólo su informe."""
+    with SessionLocal() as db:
+        try:
+            resultado = obtener_diagnostico_avanzado_imagenes_r2(db)
+            _estado(
+                db,
+                estado="completado",
+                resultado=resultado,
+                error=None,
+                finalizada_en=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception as error:
+            _estado(
+                db,
+                estado="error",
+                error=str(error)[:1000],
+                finalizada_en=datetime.now(timezone.utc).isoformat(),
+            )
 
 
 def _es_url_r2(url: str) -> bool:
