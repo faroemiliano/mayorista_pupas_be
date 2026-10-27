@@ -1,4 +1,7 @@
 import base64
+from io import BytesIO
+
+from PIL import Image
 
 from sqlalchemy import select
 
@@ -41,7 +44,9 @@ def test_admin_crea_edita_y_carga_imagen_de_producto(client, db, monkeypatch):
     assert producto.origen == "web"
     assert sum(item.cantidad for item in producto.stocks_talles) == 5
 
-    png = b"\x89PNG\r\n\x1a\n" + b"contenido-de-prueba"
+    buffer = BytesIO()
+    Image.new("RGB", (20, 20), "purple").save(buffer, format="PNG")
+    png = buffer.getvalue()
     imagen = client.post(f"/api/admin/productos/{producto_id}/imagenes", json={
         "nombre": "bikini.png",
         "media_type": "image/png",

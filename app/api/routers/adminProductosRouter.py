@@ -4,7 +4,6 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
-from cloudinary.exceptions import Error as CloudinaryError
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from slugify import slugify
@@ -25,9 +24,11 @@ from app.services.sincronizacion_catalogo_background_service import (
 )
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
 from app.services.almacenamiento_imagenes_r2_service import (
+    R2ImagenError,
     eliminar_imagen_r2_si_corresponde,
     subir_imagen_producto,
 )
+from app.services.procesamiento_imagenes_service import ImagenInvalidaError, procesar_imagen_catalogo
 
 
 router = APIRouter(prefix="/api/admin/productos", tags=["Administración - Productos"], dependencies=[Depends(require_admin)])
@@ -84,8 +85,9 @@ class ProductoAdminRequest(BaseModel):
 
 class ImagenProductoAdminRequest(BaseModel):
     nombre: str = Field(min_length=1, max_length=180)
-    media_type: str = Field(pattern=r"^image/(jpeg|png|webp|gif)$")
-    contenido_base64: str = Field(min_length=4)
+    media_type: str = Field(pattern=r"^image/(jpeg|png|webp)$")
+    # Base64 ocupa aproximadamente un tercio más que el archivo original.
+    contenido_base64: str = Field(min_length=4, max_length=16 * 1024 * 1024)
     principal: bool = False
 
 def _slug_producto(db:Session,nombre:str,producto_id:int|None=None)->str:
@@ -161,33 +163,39 @@ def editar_producto(producto_id:int,data:ProductoAdminRequest,db:Session=Depends
     return {"id":producto.id,"mensaje":"Producto actualizado correctamente."}
 
 @router.post("/{producto_id}/imagenes",status_code=201)
-def agregar_imagen(producto_id:int,data:ImagenProductoAdminRequest,db:Session=Depends(get_db)):
+def agregar_imagen(
+    producto_id:int,
+    data:ImagenProductoAdminRequest,
+    db:Session=Depends(get_db),
+    _: object = Depends(require_admin_total),
+):
     from app.models.imagen_producto import ImagenProducto
     from app.models.producto import Producto
     producto=db.scalar(select(Producto).options(selectinload(Producto.imagenes)).where(Producto.id==producto_id))
     if producto is None: raise HTTPException(404,"Producto no encontrado.")
     try: contenido=base64.b64decode(data.contenido_base64,validate=True)
     except (binascii.Error,ValueError) as error: raise HTTPException(422,"La imagen enviada no es válida.") from error
-    if len(contenido)>8*1024*1024: raise HTTPException(413,"Cada imagen puede pesar hasta 8 MB.")
-    firmas={"image/jpeg":contenido.startswith(b'\xff\xd8\xff'),"image/png":contenido.startswith(b'\x89PNG\r\n\x1a\n'),"image/webp":contenido.startswith(b'RIFF') and contenido[8:12]==b'WEBP',"image/gif":contenido.startswith((b'GIF87a',b'GIF89a'))}
-    if not firmas.get(data.media_type,False): raise HTTPException(422,"El contenido no coincide con el formato de la imagen.")
+    try:
+        procesada = procesar_imagen_catalogo(contenido, media_type_declarado=data.media_type)
+    except ImagenInvalidaError as error:
+        raise HTTPException(422, str(error)) from error
     orden=max((i.orden for i in producto.imagenes),default=-1)+1
     principal=data.principal or not producto.imagenes
     if principal:
         for anterior in producto.imagenes: anterior.principal=False
-    imagen=ImagenProducto(producto_id=producto_id,url="pendiente",contenido=None,media_type=data.media_type,orden=orden,principal=principal)
+    imagen=ImagenProducto(producto_id=producto_id,url="pendiente",contenido=None,media_type=procesada.media_type,orden=orden,principal=principal)
     db.add(imagen);db.flush()
     try:
         imagen.url=subir_imagen_producto(
-            contenido=contenido,
+            contenido=procesada.contenido,
             producto_id=producto_id,
             imagen_id=imagen.id,
             nombre=data.nombre,
-            media_type=data.media_type,
+            media_type=procesada.media_type,
         )
-    except (CloudinaryError, ValueError) as error:
+    except (R2ImagenError, ValueError) as error:
         db.rollback()
-        raise HTTPException(502,"No se pudo guardar la imagen en Cloudinary. Intentá nuevamente.") from error
+        raise HTTPException(502,"No se pudo guardar la imagen optimizada en R2. Intentá nuevamente.") from error
     if principal: producto.imagen_url=imagen.url
     db.commit();db.refresh(imagen)
     return {"id":imagen.id,"url":imagen.url,"orden":imagen.orden,"principal":imagen.principal}

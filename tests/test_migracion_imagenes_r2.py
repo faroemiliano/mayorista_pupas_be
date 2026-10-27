@@ -4,6 +4,7 @@ from app.core.config import settings
 from app.models.imagen_producto import ImagenProducto
 from app.models.producto import Producto
 from app.services import migracion_imagenes_r2_service as migracion_r2
+from app.services.procesamiento_imagenes_service import ImagenProcesada
 
 
 def test_migra_todas_las_imagenes_de_un_producto_y_guarda_respaldo(db, monkeypatch):
@@ -33,8 +34,12 @@ def test_migra_todas_las_imagenes_de_un_producto_y_guarda_respaldo(db, monkeypat
     monkeypatch.setattr(
         migracion_r2,
         "subir_imagen_producto_a_r2",
-        lambda **kwargs: f"https://imagenes.pupasmayorista.com.ar/pupas/{kwargs['imagen_id']}.webp",
+        lambda **kwargs: f"https://imagenes.pupasmayorista.com.ar/pupas/{kwargs['producto_id']}/nueva.webp",
     )
+    monkeypatch.setattr(migracion_r2, "procesar_imagen_catalogo", lambda *_args, **_kwargs: ImagenProcesada(
+        contenido=b"webp", media_type="image/webp", ancho_original=1, alto_original=1,
+        ancho=1, alto=1, peso_original=1, peso=1, formato_original="WEBP",
+    ))
 
     resultado = migracion_r2.migrar_imagenes_producto_a_r2(db, producto.id)
 
@@ -44,7 +49,7 @@ def test_migra_todas_las_imagenes_de_un_producto_y_guarda_respaldo(db, monkeypat
     imagen_actualizada = db.scalar(select(ImagenProducto).where(ImagenProducto.id == imagen.id))
     producto_actualizado = db.get(Producto, producto.id)
     assert imagen_actualizada.respaldo_url == "https://res.cloudinary.com/demo/image/upload/pijama.jpg"
-    assert imagen_actualizada.url == f"https://imagenes.pupasmayorista.com.ar/pupas/{imagen.id}.webp"
+    assert imagen_actualizada.url == f"https://imagenes.pupasmayorista.com.ar/pupas/{producto.id}/nueva.webp"
     assert producto_actualizado.imagen_url == imagen_actualizada.url
 
 
@@ -67,12 +72,16 @@ def test_migra_imagen_principal_sin_registro_de_galeria(db, monkeypatch):
     monkeypatch.setattr(
         migracion_r2,
         "subir_imagen_producto_a_r2",
-        lambda **kwargs: f"https://imagenes.pupasmayorista.com.ar/pupas/{kwargs['producto_id']}/{kwargs['imagen_id']}.jpg",
+        lambda **kwargs: f"https://imagenes.pupasmayorista.com.ar/pupas/{kwargs['producto_id']}/nueva.webp",
     )
+    monkeypatch.setattr(migracion_r2, "procesar_imagen_catalogo", lambda *_args, **_kwargs: ImagenProcesada(
+        contenido=b"webp", media_type="image/webp", ancho_original=1, alto_original=1,
+        ancho=1, alto=1, peso_original=1, peso=1, formato_original="JPEG",
+    ))
 
     resultado = migracion_r2.migrar_imagenes_producto_a_r2(db, producto.id)
 
     assert resultado["actualizado"] is True
     assert resultado["copiadas"] == 1
     db.expire_all()
-    assert db.get(Producto, producto.id).imagen_url.endswith(f"/{producto.id}/0.jpg")
+    assert db.get(Producto, producto.id).imagen_url.endswith(f"/{producto.id}/nueva.webp")

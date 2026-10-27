@@ -19,6 +19,7 @@ from app.services.almacenamiento_imagenes_r2_service import (
     subir_imagen_producto_a_r2,
 )
 from app.services.producto_service import _obtener_imagen_catalogo
+from app.services.procesamiento_imagenes_service import procesar_imagen_catalogo
 from app.services.migracion_woocommerce_service import _guardar
 
 
@@ -107,12 +108,11 @@ def _migrar_principal_directa(producto: Producto) -> bool:
         return False
 
     contenido, media_type = _obtener_imagen_catalogo(producto.imagen_url)
+    procesada = procesar_imagen_catalogo(contenido, media_type_declarado=media_type)
     producto.imagen_url = subir_imagen_producto_a_r2(
-        contenido=contenido,
+        contenido=procesada.contenido,
         producto_id=producto.id,
-        # 0 se reserva para la imagen principal histórica sin registro propio.
-        imagen_id=0,
-        media_type=media_type,
+        media_type=procesada.media_type,
     )
     return True
 
@@ -161,7 +161,12 @@ def migrar_imagenes_a_r2(db: Session) -> dict:
                 anterior = imagen.url
                 try:
                     contenido, media_type = (imagen.contenido, imagen.media_type or "image/jpeg") if imagen.contenido is not None else _obtener_imagen_catalogo(anterior)
-                    nueva = subir_imagen_producto_a_r2(contenido=contenido, producto_id=imagen.producto_id, imagen_id=imagen.id, media_type=media_type)
+                    procesada = procesar_imagen_catalogo(contenido, media_type_declarado=media_type)
+                    nueva = subir_imagen_producto_a_r2(
+                        contenido=procesada.contenido,
+                        producto_id=imagen.producto_id,
+                        media_type=procesada.media_type,
+                    )
                     imagen.respaldo_url = imagen.respaldo_url or anterior
                     imagen.url = nueva
                     if imagen.producto and (imagen.principal or imagen.producto.imagen_url == anterior):
@@ -237,11 +242,11 @@ def migrar_imagenes_producto_a_r2(db: Session, producto_id: int) -> dict:
                 media_type = imagen.media_type or "image/jpeg"
             else:
                 contenido, media_type = _obtener_imagen_catalogo(imagen.url)
+            procesada = procesar_imagen_catalogo(contenido, media_type_declarado=media_type)
             nueva_url = subir_imagen_producto_a_r2(
-                contenido=contenido,
+                contenido=procesada.contenido,
                 producto_id=producto.id,
-                imagen_id=imagen.id,
-                media_type=media_type,
+                media_type=procesada.media_type,
             )
             preparadas.append((imagen, imagen.url, nueva_url))
         except Exception as error:

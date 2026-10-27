@@ -11,10 +11,9 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
+import httpx
+
 from app.core.config import settings
-from app.services.migracion_imagenes_cloudinary_service import (
-    subir_imagen_producto_a_cloudinary,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -24,12 +23,7 @@ class R2ImagenError(ValueError):
     """Error al guardar un archivo en el bucket propio."""
 
 
-_EXTENSION_POR_MEDIA_TYPE = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/gif": "gif",
-}
+_EXTENSION_POR_MEDIA_TYPE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 _MAX_TAMANIO_VIDEO_PORTADA = 50 * 1024 * 1024
 
@@ -57,11 +51,9 @@ def _cliente_r2() -> Any:
     )
 
 
-def clave_imagen_producto(*, producto_id: int, imagen_id: int, media_type: str) -> str:
-    extension = _EXTENSION_POR_MEDIA_TYPE.get(media_type)
-    if extension is None:
-        raise R2ImagenError("El formato de imagen no está permitido para R2.")
-    return f"pupas/catalogo/productos/{producto_id}/imagenes/{imagen_id}.{extension}"
+def clave_imagen_producto(*, producto_id: int) -> str:
+    """Clave inmutable: no reutiliza una URL que el navegador pueda cachear."""
+    return f"pupas/catalogo/productos/{producto_id}/imagenes/{uuid4().hex}.webp"
 
 
 def url_publica_r2(clave: str) -> str:
@@ -71,15 +63,26 @@ def url_publica_r2(clave: str) -> str:
     return f"{base}/{quote(clave, safe='/')}"
 
 
-def subir_imagen_producto_a_r2(
-    *, contenido: bytes, producto_id: int, imagen_id: int, media_type: str
-) -> str:
-    """Sube una imagen nueva a R2 y devuelve sólo su URL pública propia."""
-    clave = clave_imagen_producto(
-        producto_id=producto_id,
-        imagen_id=imagen_id,
-        media_type=media_type,
-    )
+def _verificar_imagen_publica_r2(*, clave: str) -> None:
+    """Confirma el objeto y que la URL pública pueda entregarlo antes de usarla."""
+    try:
+        datos = _cliente_r2().head_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
+        if int(datos.get("ContentLength", 0)) <= 0:
+            raise R2ImagenError("La imagen subida a R2 quedó vacía.")
+        respuesta = httpx.head(url_publica_r2(clave), timeout=10.0, follow_redirects=False)
+        if respuesta.status_code != 200 or not respuesta.headers.get("content-type", "").lower().startswith("image/webp"):
+            raise R2ImagenError("La imagen no quedó disponible públicamente en R2.")
+    except R2ImagenError:
+        raise
+    except Exception as error:
+        raise R2ImagenError("No se pudo verificar la imagen subida a R2.") from error
+
+
+def subir_imagen_producto_a_r2(*, contenido: bytes, producto_id: int, media_type: str) -> str:
+    """Sube una imagen WebP inmutable a R2 y verifica su publicación."""
+    if media_type != "image/webp":
+        raise R2ImagenError("Las imágenes del catálogo deben normalizarse a WebP antes de subirlas a R2.")
+    clave = clave_imagen_producto(producto_id=producto_id)
     try:
         _cliente_r2().put_object(
             Bucket=settings.R2_BUCKET_NAME,
@@ -92,6 +95,7 @@ def subir_imagen_producto_a_r2(
         # boto3 puede no estar disponible al importar este módulo en una
         # instalación antigua; la excepción se transforma en un error claro.
         raise R2ImagenError("No se pudo guardar la imagen en R2.") from error
+    _verificar_imagen_publica_r2(clave=clave)
     return url_publica_r2(clave)
 
 
@@ -179,23 +183,10 @@ def eliminar_imagen_r2_si_corresponde(url: str) -> None:
 def subir_imagen_producto(
     *, contenido: bytes, producto_id: int, imagen_id: int, nombre: str, media_type: str
 ) -> str:
-    """Prefiere R2 y mantiene Cloudinary como respaldo temporal seguro."""
-    if r2_imagenes_configurado():
-        try:
-            return subir_imagen_producto_a_r2(
-                contenido=contenido,
-                producto_id=producto_id,
-                imagen_id=imagen_id,
-                media_type=media_type,
-            )
-        except R2ImagenError:
-            if not settings.CLOUDINARY_URL:
-                raise
-            logger.exception("Falló la carga en R2; se usará Cloudinary como respaldo.")
-
-    return subir_imagen_producto_a_cloudinary(
+    """Guarda catálogo exclusivamente en R2; nunca deja binarios en Render."""
+    del imagen_id, nombre  # se mantienen por compatibilidad con el endpoint actual.
+    return subir_imagen_producto_a_r2(
         contenido=contenido,
         producto_id=producto_id,
-        imagen_id=imagen_id,
-        nombre=nombre,
+        media_type=media_type,
     )

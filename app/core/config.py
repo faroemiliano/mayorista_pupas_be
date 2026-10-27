@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     R2_BUCKET_NAME: str = ""
     R2_ENDPOINT_URL: str = ""
     R2_PUBLIC_BASE_URL: str = ""
+    # Catálogo: las fotos siempre se normalizan antes de llegar a R2. Estos
+    # límites evitan ocupar memoria con archivos enormes o imágenes-bomba.
+    IMAGENES_MAX_BYTES: int = 12 * 1024 * 1024
+    IMAGENES_MAX_PIXELES: int = 50_000_000
+    IMAGENES_LADO_MAXIMO: int = 2000
+    IMAGENES_WEBP_QUALITY: int = 82
+    IMAGENES_DESCARGA_MAX_BYTES: int = 15 * 1024 * 1024
+    IMAGENES_AUDITORIA_CONCURRENCIA: int = 12
     # Google Analytics 4. Se configura únicamente en Render; el JSON de la
     # cuenta de servicio no se expone nunca al navegador.
     GA4_PROPERTY_ID: str = ""

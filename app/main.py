@@ -7,6 +7,7 @@ from app.api.routers.categoriasRouter import router as categorias_router
 from app.api.routers.marcasRouter import router as marcas_router
 from app.api.routers.pedidosRouter import admin_router as pedidos_admin_router
 from app.api.routers.adminProductosRouter import router as admin_productos_router
+from app.api.routers.adminImagenesRouter import router as admin_imagenes_router
 from app.api.routers.authRouter import router as auth_router
 from app.api.routers.adminUsuariosRouter import router as admin_usuarios_router
 from app.api.routers.adminClientesDuxRouter import router as admin_clientes_dux_router
@@ -89,6 +90,7 @@ app.include_router(
 app.include_router(
     admin_productos_router
 )
+app.include_router(admin_imagenes_router)
 
 
 @app.get("/")
