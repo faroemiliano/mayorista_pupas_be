@@ -22,7 +22,11 @@ from app.models.imagen_producto import ImagenProducto
 from app.models.migracion_woocommerce import MigracionWooCommerce
 from app.models.producto import Producto
 from app.database.session import SessionLocal
-from app.services.almacenamiento_imagenes_r2_service import _cliente_r2, r2_imagenes_configurado
+from app.services.almacenamiento_imagenes_r2_service import (
+    _cliente_r2,
+    r2_imagenes_configurado,
+    subir_imagen_producto_a_r2,
+)
 from app.services.migracion_woocommerce_service import _guardar
 from app.services.procesamiento_imagenes_service import ImagenInvalidaError, procesar_imagen_catalogo
 
@@ -31,6 +35,8 @@ UMBRAL_PESADO = 1 * 1024 * 1024
 UMBRALES = (1, 2, 5, 8)
 TIPO_ESTADO = "diagnostico_imagenes_r2"
 ID_ESTADO = "catalogo"
+TIPO_OPTIMIZACION = "optimizacion_imagenes_r2"
+ID_OPTIMIZACION = "catalogo"
 
 
 def _estado(db: Session, **cambios) -> dict:
@@ -83,6 +89,163 @@ def ejecutar_diagnostico_imagenes_r2_background() -> None:
             )
         except Exception as error:
             _estado(
+                db,
+                estado="error",
+                error=str(error)[:1000],
+                finalizada_en=datetime.now(timezone.utc).isoformat(),
+            )
+
+
+def _estado_optimizacion(db: Session, **cambios) -> dict:
+    fila = db.scalar(select(MigracionWooCommerce).where(
+        MigracionWooCommerce.tipo == TIPO_OPTIMIZACION,
+        MigracionWooCommerce.id_externo == ID_OPTIMIZACION,
+    ))
+    datos = dict(fila.datos) if fila else {}
+    datos.update(cambios)
+    _guardar(db, TIPO_OPTIMIZACION, ID_OPTIMIZACION, datos)
+    return datos
+
+
+def obtener_estado_optimizacion_imagenes_r2(db: Session) -> dict:
+    fila = db.scalar(select(MigracionWooCommerce).where(
+        MigracionWooCommerce.tipo == TIPO_OPTIMIZACION,
+        MigracionWooCommerce.id_externo == ID_OPTIMIZACION,
+    ))
+    if fila is None:
+        return {"estado": "pendiente", "progreso": None, "resultado": None, "error": None}
+    return dict(fila.datos)
+
+
+def _objetivos_optimizacion(db: Session) -> list[dict]:
+    diagnostico = obtener_estado_diagnostico_imagenes_r2(db)
+    if diagnostico.get("estado") != "completado" or not diagnostico.get("resultado"):
+        raise ValueError("Primero ejecutá y esperá a que termine el análisis del catálogo.")
+    return [
+        detalle for detalle in diagnostico["resultado"].get("imagenes_pesadas", [])
+        if int(detalle.get("peso_bytes") or 0) > UMBRAL_PESADO
+    ]
+
+
+def preparar_optimizacion_imagenes_r2(db: Session) -> dict:
+    if not r2_imagenes_configurado():
+        raise ValueError("R2 no está configurado en el backend.")
+    actual = obtener_estado_optimizacion_imagenes_r2(db)
+    if actual.get("estado") == "en_progreso":
+        raise ValueError("La optimización de imágenes ya está en progreso.")
+    objetivos = _objetivos_optimizacion(db)
+    if not objetivos:
+        raise ValueError("El análisis no encontró imágenes de más de 1 MB para optimizar.")
+    return _estado_optimizacion(
+        db,
+        estado="en_progreso",
+        progreso={"total": len(objetivos), "procesadas": 0, "optimizadas": 0, "sin_ahorro": 0, "fallidas": 0},
+        resultado=None,
+        error=None,
+        iniciada_en=datetime.now(timezone.utc).isoformat(),
+        finalizada_en=None,
+    )
+
+
+def _contenido_para_optimizar(imagen: ImagenProducto | None, url: str) -> tuple[bytes, str | None]:
+    if imagen is not None and imagen.contenido is not None:
+        return imagen.contenido, imagen.media_type
+    return _leer_remota(url)
+
+
+def optimizar_imagenes_pesadas_r2(db: Session) -> dict:
+    """Optimiza sólo las fotos pesadas halladas por el último diagnóstico.
+
+    Cada foto se sube primero con una URL inmutable y se actualiza la referencia
+    recién después de verificarla. Los objetos originales no se eliminan.
+    """
+    objetivos = _objetivos_optimizacion(db)
+    procesadas = optimizadas = sin_ahorro = fallidas = 0
+    ahorro_total = 0
+    errores: list[dict] = []
+    for objetivo in objetivos:
+        imagen_id = objetivo.get("imagen_id")
+        producto_id = int(objetivo["producto_id"])
+        url_original = str(objetivo["url"])
+        imagen = db.get(ImagenProducto, imagen_id) if imagen_id is not None else None
+        producto = db.get(Producto, producto_id)
+        try:
+            if producto is None:
+                raise ValueError("El producto ya no existe.")
+            if imagen is not None:
+                if imagen.url != url_original:
+                    raise ValueError("La foto cambió desde el análisis; ejecutá uno nuevo antes de optimizarla.")
+                url_actual = imagen.url
+            else:
+                if producto.imagen_url != url_original:
+                    raise ValueError("La portada cambió desde el análisis; ejecutá uno nuevo antes de optimizarla.")
+                url_actual = producto.imagen_url
+            if not url_actual:
+                raise ValueError("La foto no tiene una URL válida.")
+
+            contenido, media_type = _contenido_para_optimizar(imagen, url_actual)
+            media_type = media_type.split(";", 1)[0] if media_type else None
+            procesada = procesar_imagen_catalogo(contenido, media_type_declarado=media_type)
+            if procesada.peso >= len(contenido):
+                sin_ahorro += 1
+            else:
+                nueva_url = subir_imagen_producto_a_r2(
+                    contenido=procesada.contenido,
+                    producto_id=producto.id,
+                    media_type=procesada.media_type,
+                )
+                if imagen is not None:
+                    imagen.url = nueva_url
+                    if imagen.principal or producto.imagen_url == url_actual:
+                        producto.imagen_url = nueva_url
+                else:
+                    producto.imagen_url = nueva_url
+                db.commit()
+                optimizadas += 1
+                ahorro_total += len(contenido) - procesada.peso
+        except Exception as error:
+            db.rollback()
+            fallidas += 1
+            if len(errores) < 50:
+                errores.append({
+                    "imagen_id": imagen_id,
+                    "producto_id": producto_id,
+                    "error": str(error)[:300],
+                })
+        procesadas += 1
+        _estado_optimizacion(
+            db,
+            estado="en_progreso",
+            progreso={"total": len(objetivos), "procesadas": procesadas, "optimizadas": optimizadas, "sin_ahorro": sin_ahorro, "fallidas": fallidas},
+            errores=errores,
+        )
+    resultado = {
+        "procesadas": procesadas,
+        "optimizadas": optimizadas,
+        "sin_ahorro": sin_ahorro,
+        "fallidas": fallidas,
+        "ahorro_bytes": ahorro_total,
+        "ahorro_mb": round(ahorro_total / 1024 / 1024, 2),
+        "originales_conservados": True,
+    }
+    _estado_optimizacion(
+        db,
+        estado="completada",
+        progreso=None,
+        resultado=resultado,
+        error=None,
+        errores=errores,
+        finalizada_en=datetime.now(timezone.utc).isoformat(),
+    )
+    return resultado
+
+
+def ejecutar_optimizacion_imagenes_r2_background() -> None:
+    with SessionLocal() as db:
+        try:
+            optimizar_imagenes_pesadas_r2(db)
+        except Exception as error:
+            _estado_optimizacion(
                 db,
                 estado="error",
                 error=str(error)[:1000],
