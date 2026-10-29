@@ -1,4 +1,8 @@
+import base64
+from io import BytesIO
+
 import pytest
+from PIL import Image
 
 def test_visitante_no_puede_usar_carrito(public_client):
     response = public_client.post("/api/carrito/calcular", json={"items": []})
@@ -39,6 +43,62 @@ def test_admin_operativo_no_accede_a_analitica_migracion_configuracion_ni_stock_
             assert operativa.get("/api/admin/migracion-wordpress/resumen").status_code == 403
             assert operativa.patch("/api/admin/configuracion/dux/modo", json={"habilitado": True}).status_code == 403
             assert operativa.get("/api/admin/productos/stock-talles").status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_admin_operativo_puede_cargar_foto_de_producto(engine, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.core.security import get_usuario_opcional
+    from app.database.session import get_db
+    from app.main import app
+    from app.models.producto import Producto
+    from app.models.usuario import Usuario
+
+    with Session(engine) as db:
+        producto = Producto(
+            dux_codigo="WEB-FOTO-OPERATIVA",
+            nombre="Producto nuevo",
+            slug="producto-nuevo-foto-operativa",
+            origen="web",
+        )
+        db.add(producto)
+        db.commit()
+        producto_id = producto.id
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_usuario_opcional] = lambda: Usuario(
+        id=2,
+        email="operativa@test.local",
+        nombre="Operativa",
+        rol="admin_operativo",
+        activo=True,
+    )
+    monkeypatch.setattr(
+        "app.api.routers.adminProductosRouter.subir_imagen_producto",
+        lambda **_kwargs: "https://imagenes.pupasmayorista.com.ar/foto.webp",
+    )
+    imagen = BytesIO()
+    Image.new("RGB", (20, 20), "blue").save(imagen, format="PNG")
+
+    try:
+        with TestClient(app) as operativa:
+            response = operativa.post(
+                f"/api/admin/productos/{producto_id}/imagenes",
+                json={
+                    "nombre": "foto.png",
+                    "media_type": "image/png",
+                    "contenido_base64": base64.b64encode(imagen.getvalue()).decode(),
+                    "principal": True,
+                },
+            )
+        assert response.status_code == 201, response.text
     finally:
         app.dependency_overrides.clear()
 

@@ -167,7 +167,6 @@ def agregar_imagen(
     producto_id:int,
     data:ImagenProductoAdminRequest,
     db:Session=Depends(get_db),
-    _: object = Depends(require_admin_total),
 ):
     from app.models.imagen_producto import ImagenProducto
     from app.models.producto import Producto
