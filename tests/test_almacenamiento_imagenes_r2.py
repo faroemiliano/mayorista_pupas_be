@@ -52,3 +52,24 @@ def test_carga_nueva_prefiere_r2_cuando_esta_configurado(monkeypatch):
     )
 
     assert url == "https://imagenes.pupasmayorista.com.ar/foto.jpg"
+
+
+def test_verificacion_publica_reintenta_una_respuesta_transitoria(monkeypatch):
+    _configurar_r2(monkeypatch)
+    cliente = _ClienteR2Falso()
+    monkeypatch.setattr(r2, "_cliente_r2", lambda: cliente)
+    respuestas = iter([
+        type("Respuesta", (), {"status_code": 404, "headers": {}})(),
+        type(
+            "Respuesta",
+            (),
+            {"status_code": 200, "headers": {"content-type": "image/webp"}},
+        )(),
+    ])
+    monkeypatch.setattr(r2.httpx, "head", lambda *_args, **_kwargs: next(respuestas))
+    esperas = []
+    monkeypatch.setattr(r2.time, "sleep", esperas.append)
+
+    r2._verificar_imagen_publica_r2(clave="pupas/catalogo/productos/1/foto.webp")
+
+    assert esperas == [0.5]

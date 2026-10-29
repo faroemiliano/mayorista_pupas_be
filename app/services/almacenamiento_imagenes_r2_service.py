@@ -7,6 +7,7 @@ cuando todas sus credenciales están configuradas explícitamente en el entorno.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
@@ -26,6 +27,8 @@ class R2ImagenError(ValueError):
 _EXTENSION_POR_MEDIA_TYPE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 _MAX_TAMANIO_VIDEO_PORTADA = 50 * 1024 * 1024
+_INTENTOS_VERIFICACION_PUBLICA = 3
+_ESPERAS_VERIFICACION_PUBLICA = (0.5, 1.5)
 
 
 def r2_imagenes_configurado() -> bool:
@@ -69,9 +72,25 @@ def _verificar_imagen_publica_r2(*, clave: str) -> None:
         datos = _cliente_r2().head_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
         if int(datos.get("ContentLength", 0)) <= 0:
             raise R2ImagenError("La imagen subida a R2 quedó vacía.")
-        respuesta = httpx.head(url_publica_r2(clave), timeout=10.0, follow_redirects=False)
-        if respuesta.status_code != 200 or not respuesta.headers.get("content-type", "").lower().startswith("image/webp"):
-            raise R2ImagenError("La imagen no quedó disponible públicamente en R2.")
+        ultimo_error: Exception | None = None
+        for intento in range(_INTENTOS_VERIFICACION_PUBLICA):
+            try:
+                respuesta = httpx.head(
+                    url_publica_r2(clave), timeout=10.0, follow_redirects=False
+                )
+                if respuesta.status_code == 200 and respuesta.headers.get(
+                    "content-type", ""
+                ).lower().startswith("image/webp"):
+                    return
+                ultimo_error = R2ImagenError(
+                    f"R2 público respondió {respuesta.status_code} "
+                    f"({respuesta.headers.get('content-type', 'sin content-type')})."
+                )
+            except httpx.HTTPError as error:
+                ultimo_error = error
+            if intento < len(_ESPERAS_VERIFICACION_PUBLICA):
+                time.sleep(_ESPERAS_VERIFICACION_PUBLICA[intento])
+        raise R2ImagenError("La imagen no quedó disponible públicamente en R2.") from ultimo_error
     except R2ImagenError:
         raise
     except Exception as error:
