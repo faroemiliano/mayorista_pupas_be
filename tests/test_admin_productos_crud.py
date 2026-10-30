@@ -83,3 +83,47 @@ def test_admin_crea_producto_sin_sku_y_genera_codigo_interno(client, db):
     assert producto is not None
     assert producto.dux_codigo == f"WEB-{producto.id}"
     assert producto.codigo_externo is None
+
+
+def test_admin_prepara_y_confirma_carga_directa_de_imagen(client, db, monkeypatch):
+    producto = Producto(
+        dux_codigo="WEB-DIRECTA-1",
+        nombre="Producto con carga directa",
+        slug="producto-con-carga-directa",
+        origen="web",
+    )
+    db.add(producto)
+    db.commit()
+
+    clave = f"pupas/catalogo/productos/{producto.id}/imagenes/directa.webp"
+    url = f"https://imagenes.pupasmayorista.com.ar/{clave}"
+    monkeypatch.setattr(
+        "app.api.routers.adminProductosRouter.crear_carga_directa_imagen_producto",
+        lambda **_: {"clave": clave, "upload_url": "https://r2.example/carga", "imagen_url": url},
+    )
+    preparacion = client.post(
+        f"/api/admin/productos/{producto.id}/imagenes/carga-directa",
+        json={"media_type": "image/webp", "tamano": 120_000},
+    )
+    assert preparacion.status_code == 200, preparacion.text
+
+    monkeypatch.setattr(
+        "app.api.routers.adminProductosRouter.confirmar_imagen_producto_en_r2",
+        lambda **_: url,
+    )
+    confirmacion = client.put(
+        f"/api/admin/productos/{producto.id}/imagenes/confirmar",
+        json={"clave": clave, "principal": True},
+    )
+    assert confirmacion.status_code == 201, confirmacion.text
+    assert confirmacion.json()["url"] == url
+    assert confirmacion.json()["principal"] is True
+    repetida = client.put(
+        f"/api/admin/productos/{producto.id}/imagenes/confirmar",
+        json={"clave": clave, "principal": True},
+    )
+    assert repetida.status_code == 201
+    assert repetida.json()["id"] == confirmacion.json()["id"]
+    db.expire_all()
+    assert db.get(Producto, producto.id).imagen_url == url
+    assert len(db.get(Producto, producto.id).imagenes) == 1

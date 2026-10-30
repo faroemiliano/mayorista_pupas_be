@@ -25,6 +25,8 @@ from app.services.sincronizacion_catalogo_background_service import (
 from app.services.stock_fuente_service import sumar_stock_fuente_activa
 from app.services.almacenamiento_imagenes_r2_service import (
     R2ImagenError,
+    confirmar_imagen_producto_en_r2,
+    crear_carga_directa_imagen_producto,
     eliminar_imagen_r2_si_corresponde,
     subir_imagen_producto,
 )
@@ -88,6 +90,14 @@ class ImagenProductoAdminRequest(BaseModel):
     media_type: str = Field(pattern=r"^image/(jpeg|png|webp)$")
     # Base64 ocupa aproximadamente un tercio más que el archivo original.
     contenido_base64: str = Field(min_length=4, max_length=16 * 1024 * 1024)
+    principal: bool = False
+
+class ImagenProductoCargaDirectaRequest(BaseModel):
+    media_type: str = Field(pattern=r"^image/webp$")
+    tamano: int = Field(gt=0, le=8 * 1024 * 1024)
+
+class ImagenProductoConfirmacionRequest(BaseModel):
+    clave: str = Field(min_length=10, max_length=700)
     principal: bool = False
 
 def _slug_producto(db:Session,nombre:str,producto_id:int|None=None)->str:
@@ -196,6 +206,65 @@ def agregar_imagen(
         db.rollback()
         raise HTTPException(502,"No se pudo guardar la imagen optimizada en R2. Intentá nuevamente.") from error
     if principal: producto.imagen_url=imagen.url
+    db.commit();db.refresh(imagen)
+    return {"id":imagen.id,"url":imagen.url,"orden":imagen.orden,"principal":imagen.principal}
+
+@router.post("/{producto_id}/imagenes/carga-directa")
+def preparar_carga_directa_imagen(
+    producto_id:int,
+    data:ImagenProductoCargaDirectaRequest,
+    db:Session=Depends(get_db),
+):
+    if db.get(Producto, producto_id) is None:
+        raise HTTPException(404,"Producto no encontrado.")
+    try:
+        return crear_carga_directa_imagen_producto(
+            producto_id=producto_id,
+            media_type=data.media_type,
+            tamano=data.tamano,
+        )
+    except R2ImagenError as error:
+        raise HTTPException(502, str(error)) from error
+
+@router.put("/{producto_id}/imagenes/confirmar",status_code=201)
+def confirmar_carga_directa_imagen(
+    producto_id:int,
+    data:ImagenProductoConfirmacionRequest,
+    db:Session=Depends(get_db),
+):
+    from app.models.imagen_producto import ImagenProducto
+    try:
+        url = confirmar_imagen_producto_en_r2(
+            producto_id=producto_id,
+            clave=data.clave,
+        )
+    except R2ImagenError as error:
+        raise HTTPException(422, str(error)) from error
+    producto=db.scalar(
+        select(Producto)
+        .options(selectinload(Producto.imagenes))
+        .where(Producto.id==producto_id)
+        .with_for_update()
+    )
+    if producto is None:
+        raise HTTPException(404,"Producto no encontrado.")
+    existente=next((item for item in producto.imagenes if item.url==url),None)
+    if existente is not None:
+        return {"id":existente.id,"url":existente.url,"orden":existente.orden,"principal":existente.principal}
+    orden=max((item.orden for item in producto.imagenes),default=-1)+1
+    principal=data.principal or not producto.imagenes
+    if principal:
+        for anterior in producto.imagenes: anterior.principal=False
+    imagen=ImagenProducto(
+        producto_id=producto_id,
+        url=url,
+        contenido=None,
+        media_type="image/webp",
+        orden=orden,
+        principal=principal,
+    )
+    db.add(imagen)
+    if principal: producto.imagen_url=url
     db.commit();db.refresh(imagen)
     return {"id":imagen.id,"url":imagen.url,"orden":imagen.orden,"principal":imagen.principal}
 

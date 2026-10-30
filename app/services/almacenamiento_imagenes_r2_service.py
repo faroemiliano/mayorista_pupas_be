@@ -27,6 +27,7 @@ class R2ImagenError(ValueError):
 _EXTENSION_POR_MEDIA_TYPE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 _MAX_TAMANIO_VIDEO_PORTADA = 50 * 1024 * 1024
+_MAX_TAMANIO_IMAGEN_DIRECTA = 8 * 1024 * 1024
 _INTENTOS_VERIFICACION_PUBLICA = 3
 _ESPERAS_VERIFICACION_PUBLICA = (0.5, 1.5)
 
@@ -114,6 +115,61 @@ def subir_imagen_producto_a_r2(*, contenido: bytes, producto_id: int, media_type
         # boto3 puede no estar disponible al importar este módulo en una
         # instalación antigua; la excepción se transforma en un error claro.
         raise R2ImagenError("No se pudo guardar la imagen en R2.") from error
+    _verificar_imagen_publica_r2(clave=clave)
+    return url_publica_r2(clave)
+
+
+def crear_carga_directa_imagen_producto(
+    *, producto_id: int, media_type: str, tamano: int
+) -> dict[str, str]:
+    """Autoriza al navegador a subir un WebP optimizado directamente a R2."""
+    if media_type != "image/webp":
+        raise R2ImagenError("La foto optimizada debe estar en formato WebP.")
+    if tamano <= 0 or tamano > _MAX_TAMANIO_IMAGEN_DIRECTA:
+        raise R2ImagenError("La foto optimizada puede pesar hasta 8 MB.")
+    clave = clave_imagen_producto(producto_id=producto_id)
+    try:
+        upload_url = _cliente_r2().generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": settings.R2_BUCKET_NAME,
+                "Key": clave,
+                "ContentType": media_type,
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
+            ExpiresIn=600,
+            HttpMethod="PUT",
+        )
+    except Exception as error:
+        raise R2ImagenError("No se pudo preparar la carga directa de la foto.") from error
+    return {
+        "clave": clave,
+        "upload_url": upload_url,
+        "imagen_url": url_publica_r2(clave),
+    }
+
+
+def confirmar_imagen_producto_en_r2(*, producto_id: int, clave: str) -> str:
+    """Valida el objeto subido directamente antes de asociarlo al catálogo."""
+    prefijo = f"pupas/catalogo/productos/{producto_id}/imagenes/"
+    if not clave.startswith(prefijo) or not clave.endswith(".webp"):
+        raise R2ImagenError("La carga de la foto no es válida para este producto.")
+    try:
+        datos = _cliente_r2().head_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
+        tamano = int(datos.get("ContentLength", 0))
+        media_type = str(datos.get("ContentType", "")).lower()
+        if tamano <= 0:
+            raise R2ImagenError("La foto subida quedó vacía.")
+        if tamano > _MAX_TAMANIO_IMAGEN_DIRECTA:
+            _cliente_r2().delete_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
+            raise R2ImagenError("La foto optimizada supera el límite de 8 MB.")
+        if media_type != "image/webp":
+            _cliente_r2().delete_object(Bucket=settings.R2_BUCKET_NAME, Key=clave)
+            raise R2ImagenError("El archivo subido no está declarado como WebP.")
+    except R2ImagenError:
+        raise
+    except Exception as error:
+        raise R2ImagenError("No se encontró la foto cargada en R2.") from error
     _verificar_imagen_publica_r2(clave=clave)
     return url_publica_r2(clave)
 

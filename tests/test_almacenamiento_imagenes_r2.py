@@ -12,6 +12,10 @@ class _ClienteR2Falso:
     def head_object(self, **kwargs):
         return {"ContentLength": 6, "ContentType": "image/webp"}
 
+    def generate_presigned_url(self, *args, **kwargs):
+        self.presign = (args, kwargs)
+        return "https://r2.example/carga-temporal"
+
 
 def _configurar_r2(monkeypatch):
     monkeypatch.setattr(settings, "R2_ACCOUNT_ID", "cuenta-prueba")
@@ -73,3 +77,33 @@ def test_verificacion_publica_reintenta_una_respuesta_transitoria(monkeypatch):
     r2._verificar_imagen_publica_r2(clave="pupas/catalogo/productos/1/foto.webp")
 
     assert esperas == [0.5]
+
+
+def test_prepara_carga_directa_de_webp_para_producto(monkeypatch):
+    _configurar_r2(monkeypatch)
+    cliente = _ClienteR2Falso()
+    monkeypatch.setattr(r2, "_cliente_r2", lambda: cliente)
+
+    carga = r2.crear_carga_directa_imagen_producto(
+        producto_id=42,
+        media_type="image/webp",
+        tamano=120_000,
+    )
+
+    assert carga["upload_url"] == "https://r2.example/carga-temporal"
+    assert carga["clave"].startswith("pupas/catalogo/productos/42/imagenes/")
+    assert carga["imagen_url"].endswith(".webp")
+    assert cliente.presign[1]["Params"]["ContentType"] == "image/webp"
+    assert cliente.presign[1]["ExpiresIn"] == 600
+
+
+def test_confirma_carga_directa_que_pertenece_al_producto(monkeypatch):
+    _configurar_r2(monkeypatch)
+    cliente = _ClienteR2Falso()
+    monkeypatch.setattr(r2, "_cliente_r2", lambda: cliente)
+    monkeypatch.setattr(r2, "_verificar_imagen_publica_r2", lambda **_: None)
+    clave = "pupas/catalogo/productos/42/imagenes/foto.webp"
+
+    url = r2.confirmar_imagen_producto_en_r2(producto_id=42, clave=clave)
+
+    assert url == f"https://imagenes.pupasmayorista.com.ar/{clave}"
