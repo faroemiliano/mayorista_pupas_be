@@ -25,6 +25,9 @@ def bloquear_productos(db: Session, producto_ids: set[int]) -> None:
 
 
 def cantidades_reservadas(db: Session, producto_ids: set[int], excluir_usuario_carrito: int | None = None) -> dict[int, int]:
+    # Se conserva el argumento durante la transición, pero los carritos ya no
+    # afectan la disponibilidad. Solo descuentan los pedidos confirmados.
+    del excluir_usuario_carrito
     if not producto_ids:
         return {}
     filas = db.execute(
@@ -35,18 +38,11 @@ def cantidades_reservadas(db: Session, producto_ids: set[int], excluir_usuario_c
         )
         .group_by(ReservaStock.producto_id)
     ).all()
-    resultado = {producto_id: int(cantidad) for producto_id, cantidad in filas}
-    consulta_carrito = select(ReservaCarrito.producto_id, func.sum(ReservaCarrito.cantidad)).where(
-        ReservaCarrito.producto_id.in_(producto_ids), ReservaCarrito.expira_en > datetime.now(timezone.utc),
-    )
-    if excluir_usuario_carrito is not None:
-        consulta_carrito = consulta_carrito.where(ReservaCarrito.usuario_id != excluir_usuario_carrito)
-    for producto_id, cantidad in db.execute(consulta_carrito.group_by(ReservaCarrito.producto_id)).all():
-        resultado[producto_id] = resultado.get(producto_id, 0) + int(cantidad)
-    return resultado
+    return {producto_id: int(cantidad) for producto_id, cantidad in filas}
 
 
 def cantidades_reservadas_por_talle(db: Session, producto_ids: set[int], excluir_usuario_carrito: int | None = None) -> dict[tuple[int, str], int]:
+    del excluir_usuario_carrito
     if not producto_ids:
         return {}
     filas = db.execute(
@@ -54,15 +50,7 @@ def cantidades_reservadas_por_talle(db: Session, producto_ids: set[int], excluir
         .where(ReservaStock.producto_id.in_(producto_ids), ReservaStock.talle.is_not(None), ReservaStock.estado.in_(ESTADOS_QUE_DESCUENTAN))
         .group_by(ReservaStock.producto_id, ReservaStock.talle)
     ).all()
-    resultado = {(producto_id, talle): int(cantidad) for producto_id, talle, cantidad in filas}
-    consulta_carrito = select(ReservaCarrito.producto_id, ReservaCarrito.talle, func.sum(ReservaCarrito.cantidad)).where(
-        ReservaCarrito.producto_id.in_(producto_ids), ReservaCarrito.expira_en > datetime.now(timezone.utc),
-    )
-    if excluir_usuario_carrito is not None:
-        consulta_carrito = consulta_carrito.where(ReservaCarrito.usuario_id != excluir_usuario_carrito)
-    for producto_id, talle, cantidad in db.execute(consulta_carrito.group_by(ReservaCarrito.producto_id, ReservaCarrito.talle)).all():
-        clave = (producto_id, talle); resultado[clave] = resultado.get(clave, 0) + int(cantidad)
-    return resultado
+    return {(producto_id, talle): int(cantidad) for producto_id, talle, cantidad in filas}
 
 
 def liberar_reservas_carrito(db: Session, usuario_id: int) -> None:

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -53,21 +54,43 @@ def crear_producto(
     return producto
 
 
-def test_carrito_reserva_stock_y_lo_libera_al_vaciar(client: TestClient, db: Session):
+def test_carrito_no_reserva_stock_y_limpia_reservas_anteriores(client: TestClient, db: Session):
     producto = crear_producto(db, 90)
+    db.add(ReservaCarrito(
+        usuario_id=1,
+        producto_id=producto.id,
+        talle="1",
+        cantidad=5,
+        expira_en=datetime.now(timezone.utc) + timedelta(minutes=30),
+    ))
     db.commit()
 
     reserva = client.put("/api/carrito/reserva", json={"items": [{
         "producto_id": producto.id, "talle": "1", "cantidad": 5,
     }]})
     assert reserva.status_code == 200, reserva.text
-    assert cantidades_reservadas_por_talle(db, {producto.id})[(producto.id, "1")] == 5
-    assert db.scalar(select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)) is not None
-
-    liberada = client.put("/api/carrito/reserva", json={"items": []})
-    assert liberada.status_code == 200, liberada.text
+    assert reserva.json() == {"items": [], "expira_en": None}
     assert cantidades_reservadas_por_talle(db, {producto.id}).get((producto.id, "1"), 0) == 0
     assert db.scalar(select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)) is None
+
+
+def test_reserva_antigua_de_otro_carrito_no_reduce_stock(client: TestClient, db: Session):
+    producto = crear_producto(db, 91)
+    db.add(ReservaCarrito(
+        usuario_id=999,
+        producto_id=producto.id,
+        talle="1",
+        cantidad=100,
+        expira_en=datetime.now(timezone.utc) + timedelta(minutes=30),
+    ))
+    db.commit()
+
+    response = client.post("/api/carrito/calcular", json={"items": [{
+        "producto_id": producto.id, "talle": "1", "cantidad": 100,
+    }]})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["cantidad_unidades"] == 100
 
 
 def test_carrito_usa_precio_mayorista_antes_de_24(
@@ -367,7 +390,7 @@ def test_carrito_rechaza_suma_de_talles_superior_al_stock_total(
     assert "5.00 unidades disponibles" in response.json()["detail"]
 
 
-def test_reserva_rechaza_suma_de_talles_superior_al_stock_total(
+def test_endpoint_de_reserva_anterior_no_bloquea_stock(
     client: TestClient,
     db: Session,
 ):
@@ -383,8 +406,8 @@ def test_reserva_rechaza_suma_de_talles_superior_al_stock_total(
         {"producto_id": producto.id, "talle": "2", "cantidad": 3},
     ]})
 
-    assert response.status_code == 409
-    assert "5.00 unidades disponibles" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": [], "expira_en": None}
     assert db.scalar(
         select(ReservaCarrito).where(ReservaCarrito.producto_id == producto.id)
     ) is None
