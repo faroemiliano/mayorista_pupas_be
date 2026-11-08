@@ -136,7 +136,7 @@ def test_admin_prepara_y_confirma_la_carga_directa_de_un_video(client: TestClien
     assert confirmacion.json()["slide_id"] == "video-bikinis"
 
 
-def test_operador_no_puede_cambiar_fotos_de_portada(client: TestClient):
+def test_operador_puede_cambiar_fotos_y_videos_de_portada(client: TestClient, monkeypatch):
     app.dependency_overrides[get_usuario_opcional] = lambda: Usuario(
         id=2,
         email="operador@test.local",
@@ -144,8 +144,20 @@ def test_operador_no_puede_cambiar_fotos_de_portada(client: TestClient):
         rol="admin_operativo",
         activo=True,
     )
+    monkeypatch.setattr(
+        "app.api.routers.portadaInicioRouter.subir_imagen_portada_a_r2",
+        lambda **_: "https://imagenes.pupasmayorista.com.ar/pupas/sitio/portada/bikinis/operador.webp",
+    )
+    monkeypatch.setattr(
+        "app.api.routers.portadaInicioRouter.crear_carga_directa_video_portada",
+        lambda **_: {
+            "clave": "pupas/sitio/videos/video-bikinis/operador.mp4",
+            "upload_url": "https://r2.example/upload-operador",
+            "video_url": "https://imagenes.pupasmayorista.com.ar/pupas/sitio/videos/video-bikinis/operador.mp4",
+        },
+    )
 
-    response = client.put(
+    foto = client.put(
         "/api/admin/portada/bikinis",
         json={
             "nombre": "portada.webp",
@@ -153,5 +165,11 @@ def test_operador_no_puede_cambiar_fotos_de_portada(client: TestClient):
             "contenido_base64": base64.b64encode(b"RIFF\x00\x00\x00\x00WEBPcontenido").decode(),
         },
     )
+    video = client.post(
+        "/api/admin/portada/video-bikinis/video/carga",
+        json={"nombre": "campania.mp4", "media_type": "video/mp4", "tamano": 1024},
+    )
 
-    assert response.status_code == 403
+    assert foto.status_code == 200
+    assert video.status_code == 200
+    assert video.json()["clave"].endswith("/operador.mp4")

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
-from app.core.security import require_admin_total
+from app.core.security import require_admin
 from app.database.session import get_db
 from app.models.portada_inicio import PortadaInicio
 from app.models.imagen_producto import ImagenProducto
@@ -145,7 +145,7 @@ def listar_imagenes_de_catalogo(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=10),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_admin_total),
+    _: Usuario = Depends(require_admin),
 ):
     """Selector liviano: devuelve exactamente una página de fotos del catálogo."""
     filtros = [
@@ -190,7 +190,7 @@ def actualizar_portada(
     data: ImagenPortadaRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(require_admin_total),
+    usuario: Usuario = Depends(require_admin),
 ):
     if slide_id not in IMAGENES_EDITABLES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "La portada seleccionada no existe.")
@@ -223,7 +223,7 @@ def usar_imagen_de_producto_en_portada(
     data: ImagenProductoPortadaRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(require_admin_total),
+    usuario: Usuario = Depends(require_admin),
 ):
     if slide_id not in IMAGENES_EDITABLES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "La portada seleccionada no existe.")
@@ -254,7 +254,7 @@ def usar_imagen_de_producto_en_portada(
 def preparar_carga_video_portada(
     video_id: str,
     data: VideoCargaRequest,
-    usuario: Usuario = Depends(require_admin_total),
+    usuario: Usuario = Depends(require_admin),
 ):
     if video_id not in VIDEOS_EDITABLES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "El video seleccionado no existe.")
@@ -274,7 +274,7 @@ def confirmar_carga_video_portada(
     data: VideoConfirmacionRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(require_admin_total),
+    usuario: Usuario = Depends(require_admin),
 ):
     if video_id not in VIDEOS_EDITABLES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "El video seleccionado no existe.")
