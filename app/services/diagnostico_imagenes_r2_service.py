@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.models.imagen_producto import ImagenProducto
 from app.models.migracion_woocommerce import MigracionWooCommerce
+from app.models.portada_inicio import PortadaInicio
 from app.models.producto import Producto
 from app.database.session import SessionLocal
 from app.services.almacenamiento_imagenes_r2_service import (
@@ -200,6 +201,13 @@ def optimizar_imagenes_pesadas_r2(db: Session) -> dict:
                         producto.imagen_url = nueva_url
                 else:
                     producto.imagen_url = nueva_url
+                # Las colecciones del inicio pueden reutilizar una foto del
+                # catálogo. Deben acompañar el cambio de URL inmutable.
+                for portada in db.scalars(
+                    select(PortadaInicio).where(PortadaInicio.imagen_url == url_actual)
+                ).all():
+                    portada.imagen_url = nueva_url
+                    portada.media_type = procesada.media_type
                 db.commit()
                 optimizadas += 1
                 ahorro_total += len(contenido) - procesada.peso
