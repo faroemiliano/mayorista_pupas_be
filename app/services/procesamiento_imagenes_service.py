@@ -77,13 +77,21 @@ def procesar_imagen_catalogo(
             with Image.open(BytesIO(contenido)) as verificacion:
                 verificacion.verify()
             with Image.open(BytesIO(contenido)) as original:
-                if getattr(original, "is_animated", False):
-                    raise ImagenInvalidaError("No se permiten imágenes animadas en el catálogo.")
                 formato = (original.format or "").upper()
-                if formato not in _MIME_POR_FORMATO:
+                # Algunas cámaras guardan fotos con profundidad como MPO: son
+                # JPEG con una segunda vista y Pillow las marca como animadas.
+                # Para catálogo usamos únicamente la primera imagen. Los WebP
+                # realmente animados continúan rechazándose.
+                es_mpo = formato == "MPO" and mime_real == "image/jpeg"
+                if getattr(original, "is_animated", False) and not es_mpo:
+                    raise ImagenInvalidaError("No se permiten imágenes animadas en el catálogo.")
+                mime_formato = "image/jpeg" if es_mpo else _MIME_POR_FORMATO.get(formato)
+                if mime_formato is None:
                     raise ImagenInvalidaError("El formato de imagen no está permitido.")
-                if _MIME_POR_FORMATO[formato] != mime_real:
+                if mime_formato != mime_real:
                     raise ImagenInvalidaError("El contenido de la imagen es inconsistente.")
+                if es_mpo:
+                    original.seek(0)
                 original.load()
                 ancho_original, alto_original = original.size
                 if ancho_original <= 0 or alto_original <= 0:

@@ -30,3 +30,25 @@ def test_conserva_transparencia_de_png():
 def test_rechaza_archivo_con_extension_imagen_pero_contenido_invalido():
     with pytest.raises(ImagenInvalidaError):
         procesar_imagen_catalogo(b"no soy una imagen", media_type_declarado="image/jpeg")
+
+
+def test_convierte_primera_vista_de_jpeg_mpo_a_webp():
+    salida = BytesIO()
+    principal = Image.new("RGB", (120, 80), "red")
+    secundaria = Image.new("RGB", (120, 80), "blue")
+    principal.save(
+        salida,
+        format="MPO",
+        save_all=True,
+        append_images=[secundaria],
+    )
+
+    resultado = procesar_imagen_catalogo(
+        salida.getvalue(),
+        media_type_declarado="image/jpeg",
+    )
+
+    assert resultado.formato_original == "MPO"
+    with Image.open(BytesIO(resultado.contenido)) as imagen:
+        pixel = imagen.convert("RGB").getpixel((60, 40))
+        assert pixel[0] > pixel[2]
