@@ -12,7 +12,7 @@ from app.models.usuario import Usuario
 from app.models.pedido import Pedido
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.schemas.auth_schemas import UsuarioResponse
-from app.services.notificacion_service import notificar
+from app.services.notificacion_service import filtros_cliente_habilitado_para_sitio, notificar
 
 router=APIRouter(prefix="/api/admin/usuarios",tags=["Administración - Usuarios"],dependencies=[Depends(require_admin)])
 class EstadoRequest(BaseModel): estado:str
@@ -93,6 +93,10 @@ def listar_clientes_paginados(
     db: Session = Depends(get_db),
 ):
     base = Usuario.rol == "cliente"
+    total_clientes = db.scalar(select(func.count(Usuario.id)).where(base)) or 0
+    total_habilitados = db.scalar(
+        select(func.count(Usuario.id)).where(*filtros_cliente_habilitado_para_sitio())
+    ) or 0
     estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
     for estado_registro, cantidad in db.execute(
         select(Usuario.estado_registro, func.count(Usuario.id))
@@ -132,6 +136,8 @@ def listar_clientes_paginados(
         "limit": limit,
         "total_paginas": (total + limit - 1) // limit if total else 0,
         "totales_estado": estados,
+        "total_clientes": total_clientes,
+        "total_habilitados": total_habilitados,
     }
 
 

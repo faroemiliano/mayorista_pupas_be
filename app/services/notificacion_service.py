@@ -5,6 +5,20 @@ from app.models.notificacion import Notificacion
 from app.models.usuario import Usuario
 
 
+def filtros_cliente_habilitado_para_sitio():
+    """Criterio compartido por campañas y métricas del panel de clientes."""
+    return (
+        Usuario.rol == "cliente",
+        Usuario.activo.is_(True),
+        Usuario.estado_registro == "aprobado",
+        Usuario.requiere_migracion_password.is_(False),
+        or_(
+            Usuario.password_hash.is_not(None),
+            Usuario.google_sub.is_not(None),
+        ),
+    )
+
+
 def notificar(db: Session, *, audiencia: str, tipo: str, titulo: str, mensaje: str,
               usuario_id: int | None = None, pedido_id: int | None = None,
               email: str | None = None, enviar_email: bool = False,
@@ -31,16 +45,7 @@ def crear_campana(
     destinatarios: str,
     usuario_ids: list[int],
 ) -> tuple[int, int, list[int]]:
-    consulta = select(Usuario).where(
-        Usuario.rol == "cliente",
-        Usuario.activo.is_(True),
-        Usuario.estado_registro == "aprobado",
-        Usuario.requiere_migracion_password.is_(False),
-        or_(
-            Usuario.password_hash.is_not(None),
-            Usuario.google_sub.is_not(None),
-        ),
-    )
+    consulta = select(Usuario).where(*filtros_cliente_habilitado_para_sitio())
     if destinatarios == "seleccionados":
         if not usuario_ids:
             raise ValueError("Seleccioná al menos un cliente.")

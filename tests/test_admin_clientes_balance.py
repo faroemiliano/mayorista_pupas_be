@@ -45,3 +45,38 @@ def test_balance_compras_cliente_incluye_tienda_wordpress_y_filtros_de_fecha(cli
     filtrado = client.get(f"/api/admin/usuarios/{usuario.id}/balance-compras", params={"fecha_desde": "2026-09-01", "fecha_hasta": "2026-09-30"})
     assert filtrado.status_code == 200, filtrado.text
     assert filtrado.json()["periodo"] == {"pedidos": 1, "unidades": 4, "importe": 300.0}
+
+
+def test_listado_clientes_informa_total_registrado_y_habilitado(
+    client: TestClient,
+    db: Session,
+):
+    db.add_all([
+        Usuario(
+            email="habilitado@test.local", nombre="Habilitado", apellido="",
+            rol="cliente", activo=True, estado_registro="aprobado",
+            password_hash="hash", requiere_migracion_password=False,
+        ),
+        Usuario(
+            email="google@test.local", nombre="Google", apellido="",
+            rol="cliente", activo=True, estado_registro="aprobado",
+            google_sub="google-sub", requiere_migracion_password=False,
+        ),
+        Usuario(
+            email="migracion@test.local", nombre="Migración", apellido="",
+            rol="cliente", activo=True, estado_registro="aprobado",
+            password_hash=None, requiere_migracion_password=True,
+        ),
+        Usuario(
+            email="pendiente@test.local", nombre="Pendiente", apellido="",
+            rol="cliente", activo=True, estado_registro="pendiente",
+            password_hash="hash", requiere_migracion_password=False,
+        ),
+    ])
+    db.commit()
+
+    response = client.get("/api/admin/usuarios/paginados")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total_clientes"] == 4
+    assert response.json()["total_habilitados"] == 2
