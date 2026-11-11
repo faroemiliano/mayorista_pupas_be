@@ -8,15 +8,26 @@ from app.services.notificacion_service import crear_campana
 from app.core.security import hashear_password
 
 
-def _cliente(db: Session, numero: int, acepta_email: bool) -> Usuario:
+def _cliente(
+    db: Session,
+    numero: int,
+    acepta_email: bool,
+    *,
+    password_hash: str | None = "hash-activo",
+    google_sub: str | None = None,
+    requiere_migracion_password: bool = False,
+) -> Usuario:
     usuario = Usuario(
         email=f"cliente{numero}@example.com",
         nombre=f"Cliente {numero}",
         apellido="",
+        password_hash=password_hash,
+        google_sub=google_sub,
         rol="cliente",
         activo=True,
         estado_registro="aprobado",
         acepta_promociones_email=acepta_email,
+        requiere_migracion_password=requiere_migracion_password,
     )
     db.add(usuario)
     db.flush()
@@ -77,6 +88,58 @@ def test_campana_se_mantiene_dentro_de_la_plataforma(db: Session):
     assert items[acepta.id].email_destino is None
     assert items[rechaza.id].email_estado == "omitido"
     assert items[rechaza.id].email_destino is None
+
+
+def test_campana_excluye_clientes_migrados_que_no_activaron_su_cuenta(db: Session):
+    activo = _cliente(db, 1, True)
+    google = _cliente(db, 2, True, password_hash=None, google_sub="google-2")
+    _cliente(
+        db,
+        3,
+        True,
+        password_hash=None,
+        requiere_migracion_password=True,
+    )
+    db.commit()
+
+    creadas, emails, _ = crear_campana(
+        db,
+        tipo="informacion",
+        titulo="Información importante",
+        mensaje="Este mensaje es para quienes ya usan el sitio nuevo.",
+        destinatarios="todos",
+        usuario_ids=[],
+    )
+
+    assert creadas == 2
+    assert emails == 0
+    destinatarios = set(db.scalars(select(Notificacion.usuario_id)).all())
+    assert destinatarios == {activo.id, google.id}
+
+
+def test_campana_seleccionada_no_incluye_cuenta_sin_activar(db: Session):
+    pendiente = _cliente(
+        db,
+        1,
+        True,
+        password_hash=None,
+        requiere_migracion_password=True,
+    )
+    db.commit()
+
+    try:
+        crear_campana(
+            db,
+            tipo="oferta",
+            titulo="Oferta",
+            mensaje="Promoción para clientes activos.",
+            destinatarios="seleccionados",
+            usuario_ids=[pendiente.id],
+        )
+    except ValueError as error:
+        assert str(error) == "No hay clientes activos y habilitados para esta campaña."
+    else:
+        raise AssertionError("La campaña no debe incluir una cuenta migrada sin activar.")
 
 
 def test_primer_login_crea_una_sola_notificacion_de_bienvenida(

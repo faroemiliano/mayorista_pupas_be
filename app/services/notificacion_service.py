@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.notificacion import Notificacion
@@ -35,6 +35,11 @@ def crear_campana(
         Usuario.rol == "cliente",
         Usuario.activo.is_(True),
         Usuario.estado_registro == "aprobado",
+        Usuario.requiere_migracion_password.is_(False),
+        or_(
+            Usuario.password_hash.is_not(None),
+            Usuario.google_sub.is_not(None),
+        ),
     )
     if destinatarios == "seleccionados":
         if not usuario_ids:
@@ -42,7 +47,7 @@ def crear_campana(
         consulta = consulta.where(Usuario.id.in_(set(usuario_ids)))
     usuarios = list(db.scalars(consulta.order_by(Usuario.id)).all())
     if not usuarios:
-        raise ValueError("No hay clientes aprobados para esta campaña.")
+        raise ValueError("No hay clientes activos y habilitados para esta campaña.")
 
     notificaciones: list[Notificacion] = []
     for usuario in usuarios:
