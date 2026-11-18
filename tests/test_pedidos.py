@@ -278,7 +278,13 @@ def test_crear_pedido_reserva_stock_y_evitar_sobreventa(
         json=pedido_payload(producto.id, cantidad=21),
     )
     assert segundo.status_code == 400
-    assert "20" in segundo.json()["detail"]
+    assert segundo.json()["detail"] == {
+        "code": "PRODUCTO_NO_DISPONIBLE",
+        "message": f"El producto {producto.id}, talle 1, tiene 20 unidades disponibles.",
+        "producto_id": producto.id,
+        "talle": "1",
+        "disponible": 20,
+    }
 
 
 def test_pedido_rechaza_suma_de_talles_superior_al_stock_total(
@@ -302,8 +308,39 @@ def test_pedido_rechaza_suma_de_talles_superior_al_stock_total(
     response = client.post("/api/pedidos/", json=payload)
 
     assert response.status_code == 400
-    assert "5.00 unidades disponibles" in response.json()["detail"]
+    assert response.json()["detail"]["code"] == "PRODUCTO_NO_DISPONIBLE"
+    assert response.json()["detail"]["producto_id"] == producto.id
+    assert "5.00 unidades disponibles" in response.json()["detail"]["message"]
     assert db.scalar(select(Pedido.id)) is None
+
+
+def test_cliente_puede_reintentar_pedido_sin_producto_agotado(
+    client: TestClient,
+    db: Session,
+):
+    agotado = crear_producto(db, 31)
+    disponible = crear_producto(db, 32)
+    agotado.stocks_talles[0].cantidad = 0
+    agotado.stocks[0].stock_real = 0
+    agotado.stocks[0].stock_disponible = 0
+    db.commit()
+    payload = pedido_payload(agotado.id, cantidad=1)
+    payload["items"] = [
+        {"producto_id": agotado.id, "talle": "1", "cantidad": 1},
+        {"producto_id": disponible.id, "talle": "1", "cantidad": 2},
+    ]
+
+    rechazado = client.post("/api/pedidos/", json=payload)
+
+    assert rechazado.status_code == 400
+    assert rechazado.json()["detail"]["producto_id"] == agotado.id
+    payload["items"] = [
+        {"producto_id": disponible.id, "talle": "1", "cantidad": 2},
+    ]
+    confirmado = client.post("/api/pedidos/", json=payload)
+    assert confirmado.status_code == 201, confirmado.text
+    assert confirmado.json()["items"][0]["producto_id"] == disponible.id
+    assert confirmado.json()["cantidad_unidades"] == 2
 
 
 def test_cancelar_pedido_libera_reserva_local(

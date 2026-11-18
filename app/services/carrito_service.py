@@ -21,7 +21,31 @@ CANTIDAD_UNIDADES_PRECIO_ESPECIAL = 24
 
 
 class CarritoError(ValueError):
-    pass
+    def __init__(
+        self,
+        mensaje: str,
+        *,
+        producto_id: int | None = None,
+        talle: str | None = None,
+        disponible: int | str | None = None,
+        recuperable: bool = False,
+    ):
+        super().__init__(mensaje)
+        self.producto_id = producto_id
+        self.talle = talle
+        self.disponible = disponible
+        self.recuperable = recuperable
+
+    def detalle(self) -> dict | str:
+        if not self.recuperable or self.producto_id is None:
+            return str(self)
+        return {
+            "code": "PRODUCTO_NO_DISPONIBLE",
+            "message": str(self),
+            "producto_id": self.producto_id,
+            "talle": self.talle,
+            "disponible": self.disponible,
+        }
 
 
 def reservar_carrito_service(db: Session, carrito: CarritoReservaRequest, usuario_id: int) -> dict:
@@ -91,9 +115,18 @@ def calcular_carrito_service(
             for producto_id
             in productos_no_disponibles
         )
+        producto_id = productos_no_disponibles[0]
+        talle = next(
+            (item.talle for item in carrito.items if item.producto_id == producto_id),
+            None,
+        )
         raise CarritoError(
             "Productos inexistentes o no habilitados: "
-            f"{ids}."
+            f"{ids}.",
+            producto_id=producto_id,
+            talle=talle,
+            disponible=0,
+            recuperable=True,
         )
 
     cantidad_diferentes = len(producto_ids)
@@ -135,10 +168,22 @@ def calcular_carrito_service(
         cantidad = cantidades[(producto_id, talle)]
         stock_talle = next((item.cantidad for item in producto.stocks_talles if item.talle == talle), None)
         if stock_talle is None:
-            raise CarritoError(f"El producto {producto.id} no tiene configurado el talle {talle}.")
+            raise CarritoError(
+                f"El producto {producto.id} no tiene configurado el talle {talle}.",
+                producto_id=producto.id,
+                talle=talle,
+                disponible=0,
+                recuperable=True,
+            )
         disponible_talle = max(stock_talle - reservas_por_talle.get((producto_id, talle), 0), 0)
         if cantidad > disponible_talle:
-            raise CarritoError(f"El producto {producto.id}, talle {talle}, tiene {disponible_talle} unidades disponibles.")
+            raise CarritoError(
+                f"El producto {producto.id}, talle {talle}, tiene {disponible_talle} unidades disponibles.",
+                producto_id=producto.id,
+                talle=talle,
+                disponible=disponible_talle,
+                recuperable=True,
+            )
 
         stock_dux = max(
             sumar_stock_fuente_activa(producto.stocks),
@@ -153,7 +198,11 @@ def calcular_carrito_service(
         if cantidad_total_producto > stock_disponible:
             raise CarritoError(
                 f"El producto {producto.id} tiene "
-                f"{stock_disponible} unidades disponibles."
+                f"{stock_disponible} unidades disponibles.",
+                producto_id=producto.id,
+                talle=None,
+                disponible=str(stock_disponible),
+                recuperable=True,
             )
 
         subtotal = precio_unitario * cantidad

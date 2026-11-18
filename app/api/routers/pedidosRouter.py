@@ -50,7 +50,7 @@ def crear_pedido(
             background_tasks.add_task(enviar_pedido_dux_en_segundo_plano, pedido.id)
         return pedido
     except PedidoError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error.detalle) from error
 
 
 @router.get("/mios", response_model=PedidoListadoResponse)

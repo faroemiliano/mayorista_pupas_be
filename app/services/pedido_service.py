@@ -35,7 +35,9 @@ from app.services.notificacion_service import notificar
 
 
 class PedidoError(ValueError):
-    pass
+    def __init__(self, mensaje: str, *, detalle: dict | str | None = None):
+        super().__init__(mensaje)
+        self.detalle = detalle if detalle is not None else mensaje
 
 
 ESTADO_PEDIDO_ETIQUETAS = {
@@ -111,7 +113,7 @@ def crear_pedido_service(db: Session, data: PedidoCreateRequest, usuario: Usuari
             usuario.id,
         )
     except CarritoError as error:
-        raise PedidoError(str(error)) from error
+        raise PedidoError(str(error), detalle=error.detalle()) from error
 
     pedido = Pedido(
         usuario_id=usuario.id,

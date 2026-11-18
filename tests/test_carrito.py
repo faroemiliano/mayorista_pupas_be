@@ -276,9 +276,9 @@ def test_carrito_rechaza_producto_no_disponible(
     )
 
     assert response.status_code == 400
-    assert "no habilitados" in response.json()[
-        "detail"
-    ]
+    assert response.json()["detail"]["code"] == "PRODUCTO_NO_DISPONIBLE"
+    assert response.json()["detail"]["producto_id"] == producto.id
+    assert "no habilitados" in response.json()["detail"]["message"]
 
 
 def test_carrito_valida_items_y_cantidades(
@@ -310,9 +310,8 @@ def test_carrito_rechaza_cantidad_superior_al_stock(
     )
 
     assert response.status_code == 400
-    assert "talle 1" in (
-        response.json()["detail"]
-    )
+    assert response.json()["detail"]["code"] == "PRODUCTO_NO_DISPONIBLE"
+    assert response.json()["detail"]["talle"] == "1"
 
 
 def test_carrito_ignora_stock_wordpress_cuando_dux_es_fuente(
@@ -337,7 +336,7 @@ def test_carrito_ignora_stock_wordpress_cuando_dux_es_fuente(
     }]})
 
     assert response.status_code == 400
-    assert "0.00 unidades disponibles" in response.json()["detail"]
+    assert "0.00 unidades disponibles" in response.json()["detail"]["message"]
 
 
 def test_carrito_separa_talles_y_suma_unidades_del_producto(client: TestClient, db: Session):
@@ -387,7 +386,7 @@ def test_carrito_rechaza_suma_de_talles_superior_al_stock_total(
     ]})
 
     assert response.status_code == 400
-    assert "5.00 unidades disponibles" in response.json()["detail"]
+    assert "5.00 unidades disponibles" in response.json()["detail"]["message"]
 
 
 def test_endpoint_de_reserva_anterior_no_bloquea_stock(

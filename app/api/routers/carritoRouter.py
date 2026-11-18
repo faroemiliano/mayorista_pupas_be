@@ -61,5 +61,5 @@ def calcular_carrito(
     except CarritoError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(error),
+            detail=error.detalle(),
         ) from error
