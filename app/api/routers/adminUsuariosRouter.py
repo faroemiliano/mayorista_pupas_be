@@ -2,11 +2,11 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 from typing import Literal
-from app.core.security import require_admin
+from app.core.security import hashear_password, require_admin
 from app.database.session import get_db
 from app.models.usuario import Usuario
 from app.models.pedido import Pedido
@@ -16,6 +16,17 @@ from app.services.notificacion_service import filtros_cliente_habilitado_para_si
 
 router=APIRouter(prefix="/api/admin/usuarios",tags=["Administración - Usuarios"],dependencies=[Depends(require_admin)])
 class EstadoRequest(BaseModel): estado:str
+
+
+class PasswordTemporalRequest(BaseModel):
+    password_nueva: str = Field(min_length=8, max_length=128)
+    confirmar_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validar_passwords(self):
+        if self.password_nueva != self.confirmar_password:
+            raise ValueError("Las contraseñas no coinciden.")
+        return self
 
 
 def _resumen_compras_tienda(db: Session, usuario_id: int, desde: datetime | None, hasta: datetime | None) -> dict:
@@ -204,3 +215,24 @@ def cambiar_estado(usuario_id:int,data:EstadoRequest,db:Session=Depends(get_db))
     mensaje="Ya podés ingresar, ver precios y realizar pedidos." if data.estado=="aprobado" else "Tu solicitud fue rechazada. Contactate con la empresa si necesitás más información."
     notificar(db,audiencia="cliente",tipo=f"registro_{data.estado}",titulo=titulo,mensaje=mensaje,usuario_id=usuario.id,email=usuario.email,enviar_email=False)
     return usuario
+
+
+@router.patch("/{usuario_id}/password-temporal")
+def cambiar_password_cliente(
+    usuario_id: int,
+    data: PasswordTemporalRequest,
+    db: Session = Depends(get_db),
+):
+    usuario = db.get(Usuario, usuario_id)
+    if usuario is None or usuario.rol != "cliente":
+        raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+    usuario.password_hash = hashear_password(data.password_nueva)
+    usuario.requiere_migracion_password = False
+    usuario.email_verificado = True
+    usuario.reset_password_token_hash = None
+    usuario.reset_password_expira_en = None
+    db.commit()
+    return {
+        "mensaje": "Contraseña temporal actualizada correctamente.",
+        "cliente_id": usuario.id,
+    }
