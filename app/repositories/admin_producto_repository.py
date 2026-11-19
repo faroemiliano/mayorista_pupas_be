@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import distinct, func, select, union_all
+from sqlalchemy import distinct, func, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from app.models.pedido import Pedido
@@ -86,6 +86,95 @@ def get_analitica_productos(
         .where(Producto.habilitado.is_(True))
     )
     return [dict(row) for row in db.execute(query).mappings().all()]
+
+
+def get_compras_de_producto(
+    db: Session,
+    producto: Producto,
+    desde: datetime | None,
+    hasta: datetime | None,
+) -> list[dict]:
+    """Obtiene líneas vendidas del producto desde la base propia de la tienda."""
+    filtros_tienda = [
+        PedidoItem.producto_id == producto.id,
+        Pedido.estado != "cancelado",
+    ]
+    if desde is not None:
+        filtros_tienda.append(Pedido.creado_en >= desde)
+    if hasta is not None:
+        filtros_tienda.append(Pedido.creado_en < hasta)
+    consulta_tienda = (
+        select(
+            Pedido.id.label("pedido_id"),
+            Pedido.usuario_id,
+            Pedido.cliente_nombre.label("cliente"),
+            Pedido.cliente_email.label("email"),
+            Pedido.creado_en.label("fecha"),
+            PedidoItem.talle,
+            PedidoItem.cantidad,
+        )
+        .join(Pedido, Pedido.id == PedidoItem.pedido_id)
+        .where(*filtros_tienda)
+    )
+    resultado = [
+        {**dict(fila), "pedido_clave": f"tienda:{fila['pedido_id']}"}
+        for fila in db.execute(consulta_tienda).mappings()
+    ]
+
+    identidad_historica = PedidoItemHistoricoWordpress.producto_id == producto.id
+    if producto.dux_codigo:
+        identidad_historica = or_(
+            identidad_historica,
+            (
+                PedidoItemHistoricoWordpress.producto_id.is_(None)
+                & (PedidoItemHistoricoWordpress.sku == producto.dux_codigo)
+            ),
+        )
+    filtros_historicos = [
+        PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
+        identidad_historica,
+    ]
+    if desde is not None:
+        filtros_historicos.append(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        filtros_historicos.append(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
+    consulta_historica = (
+        select(
+            PedidoHistoricoWordpress.id.label("pedido_id"),
+            PedidoHistoricoWordpress.usuario_id,
+            PedidoHistoricoWordpress.facturacion,
+            PedidoHistoricoWordpress.creado_en_wordpress.label("fecha"),
+            PedidoItemHistoricoWordpress.metadatos,
+            PedidoItemHistoricoWordpress.cantidad,
+        )
+        .join(
+            PedidoHistoricoWordpress,
+            PedidoHistoricoWordpress.id == PedidoItemHistoricoWordpress.pedido_id,
+        )
+        .where(*filtros_historicos)
+    )
+    for fila in db.execute(consulta_historica).mappings():
+        facturacion = fila["facturacion"] or {}
+        cliente = " ".join(filter(None, (
+            facturacion.get("first_name"), facturacion.get("last_name"),
+        ))).strip()
+        talle = None
+        for dato in fila["metadatos"] or []:
+            nombre = str(dato.get("display_key") or dato.get("key") or "").casefold()
+            if any(token in nombre for token in ("talle", "talla", "size")):
+                talle = str(dato.get("display_value") or dato.get("value") or "").strip() or None
+                break
+        resultado.append({
+            "pedido_id": fila["pedido_id"],
+            "pedido_clave": f"historico:{fila['pedido_id']}",
+            "usuario_id": fila["usuario_id"],
+            "cliente": cliente or "Cliente sin nombre",
+            "email": facturacion.get("email"),
+            "fecha": fila["fecha"],
+            "talle": talle,
+            "cantidad": fila["cantidad"],
+        })
+    return resultado
 
 
 def get_ventas_temporales(

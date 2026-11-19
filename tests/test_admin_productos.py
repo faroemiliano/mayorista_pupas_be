@@ -2,10 +2,13 @@ from decimal import Decimal
 from datetime import datetime, timezone
 
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
+from app.models.pedido import Pedido
+from app.models.pedido_item import PedidoItem
 from app.models.precio_producto import PrecioProducto
 from app.models.producto import Producto
 from app.models.stock_producto import StockProducto
 from app.models.stock_talle_producto import StockTalleProducto
+from app.models.usuario import Usuario
 
 
 def crear_producto(db_session, numero: int) -> Producto:
@@ -160,6 +163,77 @@ def test_analitica_permite_elegir_rango_y_compara_periodo_anterior(client, db):
     assert data["resumen"]["unidades_vendidas"] == 3
     assert data["comparacion_anterior"]["resumen"]["unidades"] == 1
     assert data["comparacion_anterior"]["resumen"]["importe"] == "2000.00"
+
+
+def test_detalle_producto_agrupa_compradores_y_talles_con_filtro_de_fecha(client, db):
+    producto = crear_producto(db, 32)
+    ana = Usuario(
+        email="ana@test.local", nombre="Ana", apellido="Paula",
+        rol="cliente", estado_registro="aprobado",
+    )
+    db.add(ana)
+    db.flush()
+    pedido = Pedido(
+        usuario_id=ana.id, codigo="PUP-ANA-1", estado="confirmado",
+        cliente_nombre="Ana Paula", cliente_email=ana.email, cliente_telefono="3410000000",
+        provincia="Santa Fe", localidad="Rosario", direccion="Calle 123",
+        cantidad_productos_diferentes=1, cantidad_unidades=5,
+        aplica_precio_24_productos=False, subtotal_sin_descuento=Decimal("10000"),
+        descuento_aplicado=Decimal("0"), total=Decimal("10000"),
+        creado_en=datetime(2026, 11, 10, 12, tzinfo=timezone.utc),
+    )
+    pedido.items.extend([
+        PedidoItem(
+            producto_id=producto.id, dux_codigo=producto.dux_codigo,
+            producto_nombre=producto.nombre, talle="4", cantidad=3,
+            precio_mayorista=Decimal("2000"), precio_unitario=Decimal("2000"),
+            subtotal_sin_descuento=Decimal("6000"), descuento_aplicado=Decimal("0"),
+            subtotal=Decimal("6000"),
+        ),
+        PedidoItem(
+            producto_id=producto.id, dux_codigo=producto.dux_codigo,
+            producto_nombre=producto.nombre, talle="3", cantidad=2,
+            precio_mayorista=Decimal("2000"), precio_unitario=Decimal("2000"),
+            subtotal_sin_descuento=Decimal("4000"), descuento_aplicado=Decimal("0"),
+            subtotal=Decimal("4000"),
+        ),
+    ])
+    historico = PedidoHistoricoWordpress(
+        wordpress_id=9301, numero="9301", usuario_id=ana.id, wordpress_customer_id=50,
+        estado="completed", total=Decimal("2000"),
+        facturacion={"first_name": "Ana", "last_name": "Paula", "email": ana.email},
+        creado_en_wordpress=datetime(2026, 10, 10, 12, tzinfo=timezone.utc),
+    )
+    historico.items.append(PedidoItemHistoricoWordpress(
+        wordpress_id=9401, wordpress_product_id=123, producto_id=producto.id,
+        nombre=producto.nombre, sku=producto.dux_codigo, cantidad=1,
+        subtotal=Decimal("2000"), total=Decimal("2000"), impuesto_total=0,
+        precio_unitario=Decimal("2000"),
+        metadatos=[{"display_key": "Talle", "display_value": "4"}],
+    ))
+    db.add_all([pedido, historico])
+    db.commit()
+
+    completo = client.get(f"/api/admin/productos/ventas/{producto.id}/compradores?dias=0")
+    assert completo.status_code == 200, completo.text
+    data = completo.json()
+    assert data["resumen"] == {"clientes": 1, "pedidos": 2, "unidades": 6}
+    assert data["talles"] == [
+        {"talle": "4", "unidades": 4},
+        {"talle": "3", "unidades": 2},
+    ]
+    assert data["compradores"][0]["cliente"] == "Ana Paula"
+    assert data["compradores"][0]["talles"] == [
+        {"talle": "3", "unidades": 2},
+        {"talle": "4", "unidades": 4},
+    ]
+
+    noviembre = client.get(
+        f"/api/admin/productos/ventas/{producto.id}/compradores",
+        params={"fecha_desde": "2026-11-01", "fecha_hasta": "2026-11-30"},
+    )
+    assert noviembre.status_code == 200, noviembre.text
+    assert noviembre.json()["resumen"] == {"clientes": 1, "pedidos": 1, "unidades": 5}
 
 
 def test_admin_puede_ocultar_producto_solo_en_la_tienda(client, db):

@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.repositories.admin_producto_repository import (
     get_analitica_productos,
+    get_compras_de_producto,
     get_ranking_clientes,
     get_ventas_categorias_destacadas,
     get_ventas_temporales,
 )
+from app.models.producto import Producto
 
 
 MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
@@ -172,4 +174,84 @@ def get_analitica_productos_service(
         "ventas_por_categoria": _ventas_por_categoria_destacada(db, desde, hasta_exclusivo),
         "mejores_clientes": get_ranking_clientes(db, desde, hasta_exclusivo, limit=10),
         "comparacion_anterior": comparacion_anterior,
+    }
+
+
+def get_compradores_producto_service(
+    db: Session,
+    producto: Producto,
+    dias: int | None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+) -> dict:
+    if fecha_desde is not None and fecha_hasta is not None:
+        desde = datetime.combine(fecha_desde, time.min, timezone.utc)
+        hasta = datetime.combine(fecha_hasta + timedelta(days=1), time.min, timezone.utc)
+    else:
+        hasta = datetime.now(timezone.utc) + timedelta(microseconds=1)
+        desde = hasta - timedelta(days=dias) if dias is not None else None
+
+    compradores: dict[str, dict] = {}
+    talles_totales: dict[str, int] = {}
+    pedidos_totales: set[str] = set()
+    for fila in get_compras_de_producto(db, producto, desde, hasta):
+        nombre = str(fila["cliente"] or "Cliente sin nombre").strip() or "Cliente sin nombre"
+        email = str(fila["email"] or "").strip().lower()
+        usuario_id = fila["usuario_id"]
+        clave = (
+            f"usuario:{usuario_id}"
+            if usuario_id is not None
+            else f"email:{email}"
+            if email
+            else f"nombre:{nombre.casefold()}"
+        )
+        talle = str(fila["talle"] or "Sin talle").strip() or "Sin talle"
+        cantidad = int(fila["cantidad"] or 0)
+        item = compradores.setdefault(clave, {
+            "usuario_id": usuario_id,
+            "cliente": nombre,
+            "email": email or None,
+            "unidades": 0,
+            "pedidos": set(),
+            "talles": {},
+            "ultima_compra": fila["fecha"],
+        })
+        if item["cliente"] == "Cliente sin nombre" and nombre != item["cliente"]:
+            item["cliente"] = nombre
+        if not item["email"] and email:
+            item["email"] = email
+        item["unidades"] += cantidad
+        item["pedidos"].add(fila["pedido_clave"])
+        item["talles"][talle] = item["talles"].get(talle, 0) + cantidad
+        if fila["fecha"] and (item["ultima_compra"] is None or fila["fecha"] > item["ultima_compra"]):
+            item["ultima_compra"] = fila["fecha"]
+        talles_totales[talle] = talles_totales.get(talle, 0) + cantidad
+        pedidos_totales.add(fila["pedido_clave"])
+
+    detalle = [{
+        **item,
+        "pedidos": len(item["pedidos"]),
+        "talles": [
+            {"talle": talle, "unidades": unidades}
+            for talle, unidades in sorted(item["talles"].items(), key=lambda par: par[0].casefold())
+        ],
+    } for item in compradores.values()]
+    detalle.sort(key=lambda item: (-item["unidades"], item["cliente"].casefold()))
+    return {
+        "producto_id": producto.id,
+        "codigo": producto.dux_codigo,
+        "producto": producto.nombre,
+        "desde": desde,
+        "hasta": hasta - timedelta(microseconds=1),
+        "resumen": {
+            "clientes": len(detalle),
+            "pedidos": len(pedidos_totales),
+            "unidades": sum(talles_totales.values()),
+        },
+        "talles": [
+            {"talle": talle, "unidades": unidades}
+            for talle, unidades in sorted(talles_totales.items(), key=lambda par: (-par[1], par[0].casefold()))
+        ],
+        "compradores": detalle,
+        "alcance": "Incluye los pedidos válidos guardados en la base de la tienda y excluye cancelados, reembolsados y fallidos.",
     }

@@ -81,3 +81,36 @@ class ProductoAnaliticaResponse(BaseModel):
     ventas_por_categoria: list[CategoriaVentaResponse]
     mejores_clientes: list[ClienteRankingResponse]
     comparacion_anterior: ComparacionPeriodoResponse | None = None
+
+
+class TalleUnidadesResponse(BaseModel):
+    talle: str
+    unidades: int
+
+
+class CompradorProductoResponse(BaseModel):
+    usuario_id: int | None = None
+    cliente: str
+    email: str | None = None
+    unidades: int
+    pedidos: int
+    talles: list[TalleUnidadesResponse]
+    ultima_compra: datetime | None = None
+
+
+class ResumenCompradoresProductoResponse(BaseModel):
+    clientes: int
+    pedidos: int
+    unidades: int
+
+
+class ProductoCompradoresResponse(BaseModel):
+    producto_id: int
+    codigo: str
+    producto: str
+    desde: datetime | None
+    hasta: datetime
+    resumen: ResumenCompradoresProductoResponse
+    talles: list[TalleUnidadesResponse]
+    compradores: list[CompradorProductoResponse]
+    alcance: str

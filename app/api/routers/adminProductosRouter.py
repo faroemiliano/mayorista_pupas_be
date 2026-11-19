@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.database.session import get_db
 from app.core.security import require_admin, require_admin_tecnico, require_admin_total
 from app.core.config import settings
-from app.schemas.admin_producto_schemas import ProductoAnaliticaResponse
+from app.schemas.admin_producto_schemas import ProductoAnaliticaResponse, ProductoCompradoresResponse
 from app.models.producto import Producto
-from app.services.admin_producto_service import get_analitica_productos_service
+from app.services.admin_producto_service import get_analitica_productos_service, get_compradores_producto_service
 from app.schemas.admin_cliente_schemas import EstadoSincronizacionDuxResponse
 from app.services.sincronizacion_catalogo_background_service import (
     ejecutar_sincronizacion_catalogo_background,
@@ -406,4 +406,24 @@ def obtener_analitica_productos(
         raise HTTPException(422, "La fecha inicial no puede ser posterior a la final.")
     return get_analitica_productos_service(
         db, None if dias == 0 else dias, limit, agrupacion, fecha_desde, fecha_hasta,
+    )
+
+
+@router.get("/ventas/{producto_id}/compradores", response_model=ProductoCompradoresResponse)
+def obtener_compradores_producto(
+    producto_id: int,
+    dias: int = Query(default=30, ge=0, le=3650),
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    db: Session = Depends(get_db),
+):
+    if (fecha_desde is None) != (fecha_hasta is None):
+        raise HTTPException(422, "Indicá ambas fechas para consultar un período.")
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(422, "La fecha inicial no puede ser posterior a la final.")
+    producto = db.get(Producto, producto_id)
+    if producto is None:
+        raise HTTPException(404, "Producto no encontrado.")
+    return get_compradores_producto_service(
+        db, producto, None if dias == 0 else dias, fecha_desde, fecha_hasta,
     )
