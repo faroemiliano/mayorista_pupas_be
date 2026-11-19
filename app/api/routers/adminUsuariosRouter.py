@@ -10,6 +10,7 @@ from app.core.security import hashear_password, require_admin
 from app.database.session import get_db
 from app.models.usuario import Usuario
 from app.models.pedido import Pedido
+from app.models.pedido_item import PedidoItem
 from app.models.pedido_historico_wordpress import PedidoHistoricoWordpress, PedidoItemHistoricoWordpress
 from app.schemas.auth_schemas import UsuarioResponse
 from app.services.notificacion_service import filtros_cliente_habilitado_para_sitio, notificar
@@ -64,6 +65,123 @@ def _combinar_resumenes(*resumenes: dict) -> dict:
         "unidades": sum(item["unidades"] for item in resumenes),
         "importe": sum((item["importe"] for item in resumenes), Decimal("0")),
     }
+
+
+def _talle_historico(metadatos: list) -> str | None:
+    for dato in metadatos or []:
+        nombre = str(dato.get("display_key") or dato.get("key") or "").casefold()
+        if any(token in nombre for token in ("talle", "talla", "size")):
+            talle = str(dato.get("display_value") or dato.get("value") or "").strip()
+            return talle or None
+    return None
+
+
+def _detalle_productos_cliente(
+    db: Session,
+    usuario_id: int,
+    desde: datetime | None,
+    hasta: datetime | None,
+) -> list[dict]:
+    """Agrupa las unidades compradas por producto y talle en ambos orígenes."""
+    agrupados: dict[tuple[str, str], dict] = {}
+
+    def agregar(
+        *,
+        origen: str,
+        pedido_id: int,
+        producto_id: int | None,
+        codigo: str | None,
+        producto: str,
+        talle: str | None,
+        unidades: int,
+        importe: Decimal,
+    ) -> None:
+        codigo_limpio = (codigo or "").strip()
+        producto_limpio = producto.strip() or "Producto sin nombre"
+        talle_limpio = (talle or "").strip() or "Sin talle"
+        identidad = (
+            f"producto:{producto_id}"
+            if producto_id is not None
+            else f"codigo:{codigo_limpio.casefold()}"
+            if codigo_limpio
+            else f"nombre:{producto_limpio.casefold()}"
+        )
+        clave = (identidad, talle_limpio.casefold())
+        fila = agrupados.setdefault(clave, {
+            "producto_id": producto_id,
+            "codigo": codigo_limpio or None,
+            "producto": producto_limpio,
+            "talle": talle_limpio,
+            "unidades": 0,
+            "pedidos": set(),
+            "importe": Decimal("0"),
+            "unidades_tienda": 0,
+            "unidades_wordpress": 0,
+        })
+        if fila["producto_id"] is None and producto_id is not None:
+            fila["producto_id"] = producto_id
+        if not fila["codigo"] and codigo_limpio:
+            fila["codigo"] = codigo_limpio
+        fila["unidades"] += int(unidades or 0)
+        fila["pedidos"].add((origen, pedido_id))
+        fila["importe"] += Decimal(importe or 0)
+        fila[f"unidades_{origen}"] += int(unidades or 0)
+
+    filtros_tienda = [Pedido.usuario_id == usuario_id, Pedido.estado != "cancelado"]
+    if desde is not None:
+        filtros_tienda.append(Pedido.creado_en >= desde)
+    if hasta is not None:
+        filtros_tienda.append(Pedido.creado_en < hasta)
+    for item, pedido_id in db.execute(
+        select(PedidoItem, Pedido.id)
+        .join(Pedido, Pedido.id == PedidoItem.pedido_id)
+        .where(*filtros_tienda)
+    ):
+        agregar(
+            origen="tienda",
+            pedido_id=pedido_id,
+            producto_id=item.producto_id,
+            codigo=item.dux_codigo,
+            producto=item.producto_nombre,
+            talle=item.talle,
+            unidades=item.cantidad,
+            importe=item.subtotal,
+        )
+
+    filtros_wordpress = [
+        PedidoHistoricoWordpress.usuario_id == usuario_id,
+        PedidoHistoricoWordpress.estado.not_in(("cancelled", "refunded", "failed")),
+    ]
+    if desde is not None:
+        filtros_wordpress.append(PedidoHistoricoWordpress.creado_en_wordpress >= desde)
+    if hasta is not None:
+        filtros_wordpress.append(PedidoHistoricoWordpress.creado_en_wordpress < hasta)
+    for item, pedido_id in db.execute(
+        select(PedidoItemHistoricoWordpress, PedidoHistoricoWordpress.id)
+        .join(
+            PedidoHistoricoWordpress,
+            PedidoHistoricoWordpress.id == PedidoItemHistoricoWordpress.pedido_id,
+        )
+        .where(*filtros_wordpress)
+    ):
+        agregar(
+            origen="wordpress",
+            pedido_id=pedido_id,
+            producto_id=item.producto_id,
+            codigo=item.sku,
+            producto=item.nombre,
+            talle=_talle_historico(item.metadatos),
+            unidades=item.cantidad,
+            importe=item.total,
+        )
+
+    resultado = []
+    for fila in agrupados.values():
+        resultado.append({**fila, "pedidos": len(fila["pedidos"])})
+    return sorted(
+        resultado,
+        key=lambda fila: (-fila["unidades"], fila["producto"].casefold(), fila["talle"].casefold()),
+    )
 
 
 def _ultima_compra_cliente(
@@ -189,6 +307,7 @@ def obtener_balance_compras_cliente(
         _resumen_compras_tienda(db, usuario_id, desde, hasta),
         _resumen_compras_wordpress(db, usuario_id, desde, hasta),
     )
+    detalle_productos = _detalle_productos_cliente(db, usuario_id, desde, hasta)
     ultima_compra = _ultima_compra_cliente(db, usuario_id)
 
     return {
@@ -196,6 +315,7 @@ def obtener_balance_compras_cliente(
         "cliente": f"{usuario.nombre} {usuario.apellido}".strip(),
         "acumulado": acumulado,
         "periodo": periodo,
+        "detalle_productos": detalle_productos,
         "ultima_compra": ultima_compra,
         "ultima_compra_anterior": _ultima_compra_cliente(
             db, usuario_id, anterior_a=ultima_compra
