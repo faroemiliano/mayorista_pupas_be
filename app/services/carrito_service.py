@@ -28,12 +28,14 @@ class CarritoError(ValueError):
         producto_id: int | None = None,
         talle: str | None = None,
         disponible: int | str | None = None,
+        solicitada: int | None = None,
         recuperable: bool = False,
     ):
         super().__init__(mensaje)
         self.producto_id = producto_id
         self.talle = talle
         self.disponible = disponible
+        self.solicitada = solicitada
         self.recuperable = recuperable
 
     def detalle(self) -> dict | str:
@@ -45,6 +47,7 @@ class CarritoError(ValueError):
             "producto_id": self.producto_id,
             "talle": self.talle,
             "disponible": self.disponible,
+            "solicitada": self.solicitada,
         }
 
 
@@ -126,6 +129,10 @@ def calcular_carrito_service(
             producto_id=producto_id,
             talle=talle,
             disponible=0,
+            solicitada=next(
+                (item.cantidad for item in carrito.items if item.producto_id == producto_id),
+                None,
+            ),
             recuperable=True,
         )
 
@@ -173,6 +180,7 @@ def calcular_carrito_service(
                 producto_id=producto.id,
                 talle=talle,
                 disponible=0,
+                solicitada=cantidad,
                 recuperable=True,
             )
         disponible_talle = max(stock_talle - reservas_por_talle.get((producto_id, talle), 0), 0)
@@ -182,6 +190,7 @@ def calcular_carrito_service(
                 producto_id=producto.id,
                 talle=talle,
                 disponible=disponible_talle,
+                solicitada=cantidad,
                 recuperable=True,
             )
 
@@ -202,6 +211,7 @@ def calcular_carrito_service(
                 producto_id=producto.id,
                 talle=None,
                 disponible=str(stock_disponible),
+                solicitada=cantidad_total_producto,
                 recuperable=True,
             )
 

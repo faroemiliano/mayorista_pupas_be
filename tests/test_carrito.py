@@ -312,6 +312,8 @@ def test_carrito_rechaza_cantidad_superior_al_stock(
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "PRODUCTO_NO_DISPONIBLE"
     assert response.json()["detail"]["talle"] == "1"
+    assert response.json()["detail"]["disponible"] == 100
+    assert response.json()["detail"]["solicitada"] == 101
 
 
 def test_carrito_ignora_stock_wordpress_cuando_dux_es_fuente(

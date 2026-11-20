@@ -284,6 +284,7 @@ def test_crear_pedido_reserva_stock_y_evitar_sobreventa(
         "producto_id": producto.id,
         "talle": "1",
         "disponible": 20,
+        "solicitada": 21,
     }
 
 
